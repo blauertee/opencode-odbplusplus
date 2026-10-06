@@ -1,5 +1,5 @@
-Pixhawk FMUv3 REV D test board (testdata/pixhawk-fmuv3*.tgz)
-=============================================================
+Pixhawk FMUv3 REV D test board (testdata/altium.pixhawk-fmuv3.tgz)
+===================================================================
 
 Source:      https://github.com/PX4/Hardware/tree/master/FMUv3_REV_D
 Commit:      bbf3de5360f0e145645c40c170fe8c4f50865a6a
@@ -10,12 +10,10 @@ License:     Creative Commons Attribution-ShareAlike 3.0 Unported
              (CC BY-SA 3.0), as stated in the "Licensing and Trademarks"
              section of the PX4/Hardware README.
 
-Changes:     The ODB++ archives in testdata/ are derived from the original
-             Altium files. Schematic component parameters were pushed into
-             the PCB in Altium Designer, and the design was imported into
-             Pulsonix and exported as ODB++ (see issue #4 for the exact
-             steps). An Altium ODB++ export of the same board may also be
-             included. No changes were made to the board layout itself.
+Changes:     The ODB++ archive in testdata/ is derived from the original
+             FMU3_REV_D.PcbDoc: it was opened in Altium Designer 20.1 and
+             exported as ODB++ (File > Fabrication Outputs > ODB++ Files).
+             No changes were made to the board itself.
 
 These derived files are distributed under the same license, CC BY-SA 3.0.
 "Pixhawk" is a trademark of its owner; its use here only identifies the

@@ -1,0 +1,16 @@
+diff --git a/OdbDesignLib/FileModel/Design/MiscInfoFile.cpp b/OdbDesignLib/FileModel/Design/MiscInfoFile.cpp
+index b45257b..e372300 100644
+--- a/OdbDesignLib/FileModel/Design/MiscInfoFile.cpp
++++ b/OdbDesignLib/FileModel/Design/MiscInfoFile.cpp
+@@ -37,8 +37,9 @@ namespace Odb::Lib::FileModel::Design
+             auto infoFilePath = path / "info";
+             if (!std::filesystem::exists(infoFilePath))
+             {
+-                auto message = "misc/info file does not exist: [" + infoFilePath.string() + "]";
+-                throw invalid_odb_error(message);
++                // misc/info is optional in practice: Altium Designer 20 does not write it
++                logwarn("misc/info file does not exist, continuing without it: [" + infoFilePath.string() + "]");
++                return true;
+             }
+ 
+             infoFile.open(infoFilePath, std::ios::in);

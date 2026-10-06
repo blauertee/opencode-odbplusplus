@@ -4,7 +4,7 @@
 # Needs: git, cmake >= 3.21, ninja, a C++17 compiler and the development
 # packages for protobuf, libarchive and zlib. On Debian/Ubuntu:
 #   apt install git cmake ninja-build g++ libprotobuf-dev protobuf-compiler \
-#               libarchive-dev zlib1g-dev libasio-dev
+#               libarchive-dev zlib1g-dev libasio-dev libabsl-dev
 # Crow (header-only, needed by OdbDesignLib) is fetched automatically.
 set -euo pipefail
 
