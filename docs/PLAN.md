@@ -1,141 +1,142 @@
-# Plan: ODB++-Inspektion als OpenCode-Toolcalls
+# Plan: ODB++ inspection as OpenCode tool calls
 
-Ziel: OpenCode (bzw. jedes LLM mit Toolcalls) soll Leiterplatten-Designs effizient
-abfragen können, ohne riesige Netzlisten in den Kontext zu kippen. Typische Fragen:
+Goal: OpenCode (or any LLM with tool calls) should be able to query PCB designs efficiently,
+without dumping huge netlists into the context. Typical questions:
 
-| Frage | Tool |
+| Question | Tool |
 |---|---|
-| Gib mir alle Verbindungen, die IC35 hat. | `odb_component { refdes: "IC35" }` |
-| Gib mir alle Bauteile auf der Signalkette zwischen IC10 und IC35. | `odb_signal_path { from: "IC10", to: "IC35" }` |
-| Gib mir alles, was am 5V-Netz hängt. | `odb_net { net: "+5V" }` |
-| Gib mir das Description-Kapitel aus dem Datenblatt von IC10. | `odb_datasheet { refdes: "IC10", section: "Description" }` |
-| Wo kommt der TUSB1046 vor? Welche Netze heißen `*I2C*`? | `odb_search { query: "TUSB1046" }` |
+| Give me every connection IC35 has. | `odb_component { refdes: "IC35" }` |
+| Give me all components on the signal chain between IC10 and IC35. | `odb_signal_path { from: "IC10", to: "IC35" }` |
+| Give me everything attached to the 5V net. | `odb_net { net: "+5V" }` |
+| Give me the Description chapter from the IC10 datasheet. | `odb_datasheet { refdes: "IC10", section: "Description" }` |
+| Where is the TUSB1046 used? Which nets are named `*I2C*`? | `odb_search { query: "TUSB1046" }` |
 
-Darauf aufbauend: Testabdeckung, Dokumentation und Firmware-Konzeption LLM-gestützt bearbeiten.
+Building on that: LLM-assisted work on test coverage, documentation and firmware design.
 
-## Architektur
+## Architecture
 
 ```
-OpenCode ──toolcall──▶ Plugin (TypeScript, läuft in OpenCode/Bun)
-                         │  BoardIndex: Graph Bauteil ⇄ Pin ⇄ Netz, im Speicher je Design
-                         │  bun:ffi, im selben Prozess
-                         ▼
-                       native/libodbpp  (kleine C-Schnittstelle, native/odbpp.cpp)
-                         │  linkt
-                         ▼
-                       libOdbDesign (C++, nam20485/OdbDesign, nur Library)
-                         │  parst
-                         ▼
-                       ODB++-Archiv (.tgz/.zip) aus KiCad / Altium / Pulsonix
+OpenCode ──tool call──▶ Plugin (TypeScript, runs inside OpenCode/Bun)
+                          │  BoardIndex: graph component ⇄ pin ⇄ net, in memory per design
+                          │  bun:ffi, same process
+                          ▼
+                        native/libodbpp  (small C interface, native/odbpp.cpp)
+                          │  links
+                          ▼
+                        libOdbDesign (C++, nam20485/OdbDesign, library only)
+                          │  parses
+                          ▼
+                        ODB++ archive (.tgz/.zip) from KiCad / Altium / Pulsonix
 ```
 
-- **OdbDesign direkt als Library, kein Server.** `native/odbpp.cpp` ist eine C-ABI mit drei
-  Funktionen (`odbpp_load_board`, `odbpp_last_error`, `odbpp_free`). Sie parst das Archiv mit
-  OdbDesign, baut das Produktmodell und gibt genau die Daten zurück, die der Index braucht:
-  Bauteile mit Properties und Position, Netze mit Pins. Für das Testboard sind das 320 KB statt
-  der 16 MB, die die REST-API liefert, geladen in ca. 1 s.
-- **Die Graph-Abfragen laufen im Plugin.** Fragen wie „was liegt zwischen A und B" sind
-  Graph-Suchen, die wir einmal pro Design indizieren und dann aus dem Speicher beantworten.
-- **Kompakte Textausgabe.** Tools liefern zeilenorientierten Text statt JSON. Rails (GND, +3V3, …)
-  werden zusammengefasst, damit ein 500-Pin-GND-Netz nicht den Kontext füllt.
-- **Designs liegen als Dateien** in einem Ordner (`designs/` im Projekt, konfigurierbar). OdbDesign
-  entpackt Archive neben sich selbst, deshalb arbeitet das Plugin auf einer Kopie im Cache.
-- **Lizenz.** OdbDesign ist AGPL-3.0 und wird jetzt in den Prozess gelinkt. Dieses Repo ist
-  GPL-3.0; GPL-3.0 §13 erlaubt die Kombination, das Gesamtwerk unterliegt dann für den
-  OdbDesign-Teil der AGPL. Für ein internes Werkzeug unkritisch, bei Weitergabe/Hosting beachten.
+- **OdbDesign used directly as a library, no server.** `native/odbpp.cpp` is a C ABI with three
+  functions (`odbpp_load_board`, `odbpp_last_error`, `odbpp_free`). It parses the archive with
+  OdbDesign, builds the product model and returns exactly the data the index needs: components
+  with properties and position, nets with pins. For the test board that is 320 KB instead of the
+  16 MB the REST API returns, loaded in about 1 s.
+- **Graph queries run in the plugin.** Questions like "what sits between A and B" are graph
+  searches that we index once per design and then answer from memory.
+- **Compact text output.** Tools return line-oriented text instead of JSON. Rails (GND, +3V3, …)
+  are summarised so a 500-pin GND net does not fill the context.
+- **Designs are files** in a folder (`designs/` in the project, configurable). OdbDesign extracts
+  archives next to themselves, so the plugin works on a copy in the cache.
+- **License.** OdbDesign is AGPL-3.0 and is now linked into the process. This repo is GPL-3.0;
+  GPL-3.0 §13 allows the combination, and the OdbDesign part of the combined work stays under the
+  AGPL. Not an issue for an internal tool; keep it in mind for redistribution or hosting.
 
 Code:
 
-| Datei | Inhalt |
+| File | Contents |
 |---|---|
-| `native/odbpp.cpp` | C-ABI über OdbDesign |
-| `native/build.sh`, `native/CMakeLists.txt` | holt OdbDesign + Crow, wendet Patches an, baut `native/lib/` |
-| `native/patches/` | Parser-Fixes und Library-only-Build für OdbDesign |
-| `src/native.ts` | `bun:ffi`-Anbindung |
-| `src/store.ts` | findet Archive, cached einen `BoardIndex` pro Archiv-Version |
-| `src/board.ts` | Index, Netzauflösung, Rail-Erkennung, Pfadsuche, Suche |
-| `src/format.ts` | Textausgabe der Tools |
-| `src/datasheet.ts` | Datenblatt-Download, `pdftotext`, Kapitel-Extraktion |
-| `src/tools.ts` | Tool-Definitionen für OpenCode |
-| `testdata/` | Testboard als ODB++ |
+| `native/odbpp.cpp` | C ABI over OdbDesign |
+| `native/build.sh`, `native/CMakeLists.txt` | fetches OdbDesign + Crow, applies patches, builds `native/lib/` |
+| `native/patches/` | parser fixes and library-only build for OdbDesign |
+| `src/native.ts` | `bun:ffi` binding |
+| `src/store.ts` | finds archives, caches one `BoardIndex` per archive version |
+| `src/board.ts` | index, net resolution, rail detection, path search, search |
+| `src/format.ts` | tool text output |
+| `src/datasheet.ts` | datasheet download, `pdftotext`, chapter extraction |
+| `src/tools.ts` | tool definitions for OpenCode |
+| `testdata/` | test board as ODB++ |
 
-## Testdesign
+## Test design
 
 [Antmicro Jetson Orin Baseboard](https://github.com/antmicro/jetson-orin-baseboard) (Apache-2.0),
-mit KiCad 9 nach ODB++ exportiert (`scripts/export-test-design.sh`):
-674 Bauteile, 800 Netze, 8 Kupferlagen, USB-C/DP, Ethernet, M.2, CSI, Power.
-Liegt als `testdata/jetson-orin-baseboard.tgz` (2,2 MB) im Repo.
+exported to ODB++ with KiCad 9 (`scripts/export-test-design.sh`):
+674 components, 800 nets, 8 copper layers, USB-C/DP, Ethernet, M.2, CSI, power.
+Stored in the repo as `testdata/jetson-orin-baseboard.tgz` (2.2 MB).
 
-Hinweis: Die Referenzbezeichner sind dort `U…`, nicht `IC…`. Die Beispiele oben funktionieren
-mit `U10`/`U35` usw.
+Note: reference designators there are `U…`, not `IC…`. The examples above work with
+`U10`/`U35` etc.
 
-## Erkenntnisse aus dem Setup
+## Findings from the setup
 
-1. **ODB++ ist Layout, nicht Schaltplan.** Netzliste, Bauteile, Footprints, Positionen und Properties
-   sind da. Es fehlen: Pin-*Namen*/Funktionen (nur Padnummern 1…n), Schaltplanseiten und Symbole.
-   KiCad kodiert die Seite immerhin im Netznamen (`/USB_Debug,_DP/USBC0_RX1_N`), und unbeschaltete
-   Pins tragen den Pinnamen (`unconnected-(U35-FLG-Pad3)`).
-2. **Properties sind Gold wert.** KiCad schreibt alle Felder als `PRP`-Records: `Value`, `MPN`,
-   `Manufacturer`, `Datasheet` (URL). Damit sind BOM- und Datenblatt-Tools möglich. Altium/Pulsonix
-   benennen die Felder anders; `src/board.ts` hat dafür eine Alias-Liste, die wir mit echten
-   Exporten nachschärfen müssen.
-3. **OdbDesign braucht Patches für KiCad-Exporte** (`native/patches/0001-…`, sollten upstream
-   als PR an OdbDesign gehen):
-   - Feature-Records ohne Attribut-Teil (`L … P 0` ohne `;…`) → Parse-Error. *Gepatcht.*
-   - Leere Attribut-Strings (`&1 `) → Parse-Error. *Gepatcht.*
-   - Property-Werte mit Leerzeichen wurden abgeschnitten (`'ROHM Semiconductor'` → `ROHM`). *Gepatcht.*
-4. **Build.** Upstream baut alle Abhängigkeiten über vcpkg inkl. gRPC für den Server. Für die
-   Library allein reichen protobuf, libarchive, zlib und das Header-only-Crow; `native/patches/0002-…`
-   ergänzt dafür eine Option `ODBDESIGN_LIB_ONLY` und macht den Build mit den Distro-Paketen
-   (protobuf 3.21) lauffähig. `native/build.sh` dauert ca. 1,5 min.
-5. **Parsen blockiert.** `odbpp_load_board` läuft synchron im OpenCode-Prozess (ca. 1 s für das
-   Testboard, danach aus dem Cache). Für sehr große Boards später in einen Bun-Worker verlegen.
+1. **ODB++ is layout, not schematic.** Netlist, components, footprints, positions and properties
+   are present. Missing: pin *names*/functions (only pad numbers 1…n), schematic sheets and
+   symbols. KiCad at least encodes the sheet in the net name (`/USB_Debug,_DP/USBC0_RX1_N`), and
+   unconnected pins carry the pin name (`unconnected-(U35-FLG-Pad3)`).
+2. **Properties are gold.** KiCad writes every field as a `PRP` record: `Value`, `MPN`,
+   `Manufacturer`, `Datasheet` (URL). That makes BOM and datasheet tools possible. Altium and
+   Pulsonix name the fields differently; `src/board.ts` has an alias list for that, which we need
+   to refine against real exports.
+3. **OdbDesign needs patches for KiCad exports** (`native/patches/0001-…`, should go upstream as
+   a PR to OdbDesign):
+   - Feature records without an attribute part (`L … P 0` without `;…`) → parse error. *Patched.*
+   - Empty attribute strings (`&1 `) → parse error. *Patched.*
+   - Property values containing spaces were truncated (`'ROHM Semiconductor'` → `ROHM`). *Patched.*
+4. **Build.** Upstream builds all dependencies through vcpkg, including gRPC for the server. The
+   library alone only needs protobuf, libarchive, zlib and header-only Crow; `native/patches/0002-…`
+   adds an `ODBDESIGN_LIB_ONLY` option and makes the build work with distro packages
+   (protobuf 3.21). `native/build.sh` takes about 1.5 min.
+5. **Parsing blocks.** `odbpp_load_board` runs synchronously in the OpenCode process (about 1 s for
+   the test board, cached afterwards). Move it into a Bun worker later for very large boards.
 
-## Tool-Katalog
+## Tool catalogue
 
-✅ in diesem Stand umgesetzt und gegen das Testboard getestet,
-🧪 umgesetzt, aber noch nicht end-to-end getestet, ⏳ geplant.
+✅ implemented and tested against the test board,
+🧪 implemented but not yet tested end to end, ⏳ planned.
 
-| Tool | Status | Zweck |
+| Tool | Status | Purpose |
 |---|---|---|
-| `odb_designs` | ✅ | ODB++-Archive im Design-Ordner auflisten |
-| `odb_component` | ✅ | Bauteil: Wert, MPN, Package, Datenblatt, alle Pins → Netz → Nachbar-Pins |
-| `odb_net` | ✅ | Alles an einem Netz, gruppiert nach Bauteil |
-| `odb_signal_path` | ✅ | Kürzeste Bauteilketten zwischen zwei Bauteilen, ohne Rails, nur über kleine Bauteile (≤ 4 Pins, einstellbar) |
-| `odb_search` | ✅ | Substring/Regex über Refdes, Wert, MPN, Beschreibung, Netznamen |
-| `odb_datasheet` | 🧪 | Datenblatt-PDF laden, Kapitel ausschneiden (Downloads waren in der Testumgebung gesperrt) |
-| `odb_bom` | ⏳ | Gruppierte Stückliste (Wert/MPN/Anzahl/Refdes) |
-| `odb_power_tree` | ⏳ | Rails → Regler → Verbraucher, Eingang → Ausgang |
-| `odb_bus` | ⏳ | Busse aus Netznamen erkennen (I2C/SPI/UART/USB/PCIe, Diff-Paare) und Teilnehmer listen |
-| `odb_test_coverage` | ⏳ | Pro Netz: Testpunkte/zugängliche Pads, Netze ohne Testzugang |
-| `odb_neighbourhood` | ⏳ | Alles innerhalb n Hops um ein Bauteil, optional als Mermaid/DOT für Doku |
-| `odb_placement` | ⏳ | Position, Seite, Bauteile in der Nähe (Layout-Review) |
+| `odb_designs` | ✅ | List ODB++ archives in the designs folder |
+| `odb_component` | ✅ | Component: value, MPN, package, datasheet, every pin → net → neighbour pins |
+| `odb_net` | ✅ | Everything on a net, grouped by component |
+| `odb_signal_path` | ✅ | Shortest component chains between two components, skipping rails, only through small parts (≤ 4 pins, configurable) |
+| `odb_search` | ✅ | Substring/regex over refdes, value, MPN, description, net names |
+| `odb_datasheet` | 🧪 | Fetch the datasheet PDF and cut out a chapter (downloads were blocked in the test environment) |
+| `odb_bom` | ⏳ | Grouped bill of materials (value/MPN/count/refdes) |
+| `odb_power_tree` | ⏳ | Rails → regulators → loads, input → output |
+| `odb_bus` | ⏳ | Detect buses from net names (I2C/SPI/UART/USB/PCIe, diff pairs) and list members |
+| `odb_test_coverage` | ⏳ | Per net: test points/accessible pads, nets without test access |
+| `odb_neighbourhood` | ⏳ | Everything within n hops of a component, optionally as Mermaid/DOT for docs |
+| `odb_placement` | ⏳ | Position, side, nearby components (layout review) |
 
-## Phasen
+## Phases
 
-**Phase 0 – Setup (dieser Stand).** Repo-Gerüst, native Anbindung an OdbDesign, Testdesign,
-sechs Tools, Unit- und Integrationstests.
+**Phase 0 – Setup (current state).** Repo scaffold, native OdbDesign binding, test design,
+six tools, unit and integration tests.
 
-**Phase 1 – Robustheit.**
-- Pin-Namen ergänzen: optional KiCad-Schaltplan-Netzliste (`kicad-cli sch export netlist`) bzw.
-  Altium-Netzliste einlesen und Padnummer → Pinname/-funktion mappen. Ohne das bleibt
-  „Pin 12 von U5" für Firmware-Fragen zu dünn.
-- Rail-Erkennung konfigurierbar machen (Regex + Fanout), Widerstandsarrays in der Pfadsuche
-  paarweise statt „alles verbunden" behandeln.
-- Property-Aliase für Altium und Pulsonix an echten Exporten prüfen.
-- Upstream-PRs für die OdbDesign-Parser-Fixes.
-- Laden in einen Bun-Worker verlegen, macOS-Build (`.dylib`) testen.
+**Phase 1 – Robustness.**
+- Add pin names: optionally read the KiCad schematic netlist (`kicad-cli sch export netlist`) or
+  an Altium netlist and map pad number → pin name/function. Without that, "pin 12 of U5" is too
+  thin for firmware questions.
+- Make rail detection configurable (regex + fanout); treat resistor arrays pairwise in the path
+  search instead of "everything connected".
+- Check property aliases for Altium and Pulsonix against real exports.
+- Upstream PRs for the OdbDesign parser fixes.
+- Move loading into a Bun worker, test the macOS build (`.dylib`).
 
-**Phase 2 – Use-Case-Tools.** Power-Tree, Bus-Erkennung, Testabdeckung, BOM. Danach Firmware-
-Konzeption: MCU-Pin → Netz → Peripherie als Tabelle, daraus Pin-Config-Header generieren.
+**Phase 2 – Use-case tools.** Power tree, bus detection, test coverage, BOM. Then firmware design:
+MCU pin → net → peripheral as a table, and generate a pin config header from it.
 
-**Phase 3 – Datenblätter.** Robuster Download (Redirects, Landing-Pages, Distributor-Links),
-Kapitel-Split über das Inhaltsverzeichnis, Seiten-Suche statt nur Überschriften, Cache pro MPN.
+**Phase 3 – Datasheets.** Robust download (redirects, landing pages, distributor links),
+chapter split via the table of contents, page search instead of headings only, cache per MPN.
 
-**Phase 4 – Verteilung.** npm-Paket mit vorgebauten `libodbpp`-Binaries pro Plattform, CI
-(Unit-Tests + Integrationstest gegen das Testboard), OpenCode-Agent/Skill-Prompt „PCB-Review", Doku.
+**Phase 4 – Distribution.** npm package with prebuilt `libodbpp` binaries per platform, CI
+(unit tests + integration test against the test board), OpenCode agent/skill prompt "PCB review",
+docs.
 
-## Offene Punkte
+## Open points
 
-- Ein echter Export aus Pulsonix und Altium (auch ein kleines Board) zum Prüfen der Property-Namen
-  und der OdbDesign-Kompatibilität.
+- A real export from Pulsonix and Altium (even a small board) to check property names and
+  OdbDesign compatibility.
