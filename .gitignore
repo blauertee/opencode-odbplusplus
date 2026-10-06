@@ -1,0 +1,6 @@
+node_modules/
+designs/*
+!designs/.gitkeep
+native/vendor/
+native/build/
+native/lib/

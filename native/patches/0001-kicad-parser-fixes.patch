@@ -1,0 +1,83 @@
+diff --git a/OdbDesignLib/FileModel/Design/AttributeLookupTable.cpp b/OdbDesignLib/FileModel/Design/AttributeLookupTable.cpp
+index f65f237..79a3cf7 100644
+--- a/OdbDesignLib/FileModel/Design/AttributeLookupTable.cpp
++++ b/OdbDesignLib/FileModel/Design/AttributeLookupTable.cpp
+@@ -10,6 +10,9 @@ namespace Odb::Lib::FileModel::Design
+ 
+ 	bool AttributeLookupTable::ParseAttributeLookupTable(const std::string& attributeLookupTableString)
+ 	{
++		// attribute section is optional in ODB++ records (KiCad omits it)
++		if (attributeLookupTableString.empty()) return true;
++
+ 		std::stringstream ss(attributeLookupTableString);
+ 		std::string token;
+ 
+diff --git a/OdbDesignLib/FileModel/Design/ComponentsFile.cpp b/OdbDesignLib/FileModel/Design/ComponentsFile.cpp
+index 65b971d..d19d1f0 100644
+--- a/OdbDesignLib/FileModel/Design/ComponentsFile.cpp
++++ b/OdbDesignLib/FileModel/Design/ComponentsFile.cpp
+@@ -519,38 +519,21 @@ namespace Odb::Lib::FileModel::Design
+ 							throw_parse_error(m_path, line, token, lineNumber);
+ 						}
+ 
+-						if (!(lineStream >> token))
+-						{
+-							throw_parse_error(m_path, line, token, lineNumber);
+-						}
+-
+-						if (!token.empty())
++						// value is a single-quoted string that may contain spaces ('ROHM Semiconductor')
++						lineStream >> std::ws;
++						if (lineStream.peek() == '\'')
+ 						{
+-							// handle case where the beginning of the value, after the opening single-quote, is whitespace...
+-							if (token == "'")
++							lineStream.get();
++							if (!std::getline(lineStream, token, '\''))
+ 							{
+-								// eat the single-quote and get the next token, i.e. the actual value (w/ space in front)
+-								if (!(lineStream >> token))
+-								{
+-									throw_parse_error(m_path, line, token, lineNumber);
+-								}
+-							}
+-
+-							if (token.size() > 0 && token[0] == '\'')
+-							{
+-								// remove leading quote							
+-								token.erase(0, 1);
+-							}
+-
+-							if (token.size() > 0 && token[token.size() - 1] == '\'')
+-							{
+-								// remove trailing quote
+-								token.erase(token.size() - 1);
++								throw_parse_error(m_path, line, token, lineNumber);
+ 							}
+-							
+-							Utils::str_trim(token);
+-						}	
+-
++						}
++						else if (!(lineStream >> token))
++						{
++							throw_parse_error(m_path, line, token, lineNumber);
++						}
++						Utils::str_trim(token);
+ 						pPropertyRecord->value = token;
+ 
+ 						double f;
+diff --git a/OdbDesignLib/FileModel/Design/FeaturesFile.cpp b/OdbDesignLib/FileModel/Design/FeaturesFile.cpp
+index 83a8e88..d74db93 100644
+--- a/OdbDesignLib/FileModel/Design/FeaturesFile.cpp
++++ b/OdbDesignLib/FileModel/Design/FeaturesFile.cpp
+@@ -210,7 +210,8 @@ namespace Odb::Lib::FileModel::Design
+ 						}
+ 						else if (!std::getline(lineStream >> std::ws, token))
+ 						{
+-							throw_parse_error(m_path, line, token, lineNumber);
++							// empty text string values are valid (KiCad emits them)
++							token.clear();
+ 						}
+ 						m_attributeTextValues.push_back(token);
+ 					}
