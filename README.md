@@ -52,6 +52,7 @@ Configuration via environment variables:
 | `odb_net` | Everything on the +5V net |
 | `odb_signal_path` | Components between U34 and J1 |
 | `odb_search` | Where is the TUSB1046? Which nets are named `*I2C*`? |
+| `odb_testpoints` | Which test pad carries I2C SDA? What is on TP21? All test points |
 | `odb_datasheet` | Description chapter from the U10 datasheet |
 
 Example output of `odb_signal_path { from: "U34", to: "J1" }` on the test board:
@@ -64,6 +65,11 @@ Example output of `odb_signal_path { from: "U34", to: "J1" }` on the test board:
 R30 | R_0R_0402 | MPN ERJ2GE0R00X | pkg R_0402_1005Metric
 ...
 ```
+
+Test points are recognised by convention: a `TP<n>` refdes, or a `TP`/`TestPoint` footprint or value
+on a part with at most two pins. `odb_testpoints` takes a `pattern` (refdes regex) for designs that
+name them differently. The ODB++ `.test_point` pad attribute is not read yet; none of the exports we
+have use it.
 
 ## Development
 

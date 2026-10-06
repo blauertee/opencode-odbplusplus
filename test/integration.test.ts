@@ -37,6 +37,13 @@ describe.skipIf(!built)("jetson-orin-baseboard via libodbpp", () => {
     expect(chains.sort()).toEqual(["U5>R117>J3", "U5>R127>J3"])
   })
 
+  test("finds the 48 test points and their nets in both directions", () => {
+    const board = store.get()
+    expect(board.testPoints()).toHaveLength(48)
+    expect([...board.findComponent("TP21")!.pins.values()]).toEqual(["DP1_HPD"])
+    expect(board.testPoints({ net: "DP1_HPD" }).map((c) => c.refDes)).toEqual(["TP21"])
+  })
+
   test("leaves the designs directory untouched", () => {
     expect(existsSync(join(root, "testdata", "jetson-orin-baseboard"))).toBe(false)
   })

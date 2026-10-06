@@ -59,6 +59,14 @@ const MPN_KEYS = ["mpn", "manufacturer part number", "manufacturer_part_number",
 const DATASHEET_KEYS = ["datasheet", "datasheet url", "datasheeturl", "componentlink1url", "help url"]
 const DESCRIPTION_KEYS = ["description", "desc"]
 
+// Test points are recognised by convention: KiCad, Altium and Pulsonix all
+// export them as one- or two-pad components with a TP refdes and/or a
+// "TP"/"TestPoint" footprint or value (ODB++'s .test_point pad attribute is
+// not exported by any of them we have seen).
+const TEST_POINT_REFDES = /^TP\d/i
+const TEST_POINT_NAME = /(?:^|[^a-z])(?:tp|test[ _-]?point)(?:[^a-z]|$)/i
+const TEST_POINT_MAX_PINS = 2
+
 export class BoardIndex {
   readonly components = new Map<string, BoardComponent>()
   readonly nets = new Map<string, BoardNet>()
@@ -146,6 +154,28 @@ export class BoardIndex {
   }
   description(c: BoardComponent) {
     return prop(c, DESCRIPTION_KEYS)
+  }
+
+  // ----------------------------------------------------------- test points
+
+  /**
+   * Whether a component is a test point. With a pattern, only the refdes is
+   * matched against it; otherwise TP<n> refdes or a TP/TestPoint footprint or
+   * value on a part with at most two pins.
+   */
+  isTestPoint(c: BoardComponent, pattern?: RegExp): boolean {
+    if (pattern) return pattern.test(c.refDes)
+    if (c.pins.size > TEST_POINT_MAX_PINS) return false
+    if (TEST_POINT_REFDES.test(c.refDes)) return true
+    return [c.package, c.part, this.value(c)].some((s) => s && TEST_POINT_NAME.test(s))
+  }
+
+  /** All test points, optionally restricted to one net, in natural refdes order. */
+  testPoints(opts: { net?: string; pattern?: RegExp } = {}): BoardComponent[] {
+    const candidates = opts.net
+      ? [...new Set((this.nets.get(opts.net)?.pins ?? []).map((p) => p.refDes))].map((r) => this.components.get(r)!)
+      : [...this.components.values()]
+    return candidates.filter((c) => c && this.isTestPoint(c, opts.pattern)).sort((a, b) => naturalCompare(a.refDes, b.refDes))
   }
 
   // --------------------------------------------------------------- queries
@@ -243,7 +273,7 @@ function prop(c: BoardComponent, keys: string[]): string | undefined {
 }
 
 /** Treat the query as a regex when it looks like one, else as a case-insensitive substring. */
-function toRegex(query: string): RegExp {
+export function toRegex(query: string): RegExp {
   try {
     if (/[\^$*+?()[\]{}|\\]/.test(query)) return new RegExp(query, "i")
   } catch {

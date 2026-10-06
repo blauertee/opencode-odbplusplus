@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { BoardIndex } from "../src/board.ts"
 import { extractSection } from "../src/datasheet.ts"
+import { testPointLine } from "../src/format.ts"
 import type { NativeBoard } from "../src/native.ts"
 
 // Tiny board: MCU U1 drives a connector J1 through a series resistor R1 and
@@ -65,6 +66,48 @@ describe("BoardIndex", () => {
     const r = board.search("stm32")
     expect(r.components.map((c) => c.refDes)).toEqual(["U1"])
     expect(board.search("UART").nets.map((n) => n.name)).toEqual(["/IO/UART_TX", "/IO/UART_TX_CONN"])
+  })
+})
+
+describe("test points", () => {
+  const tpBoard = BoardIndex.build({
+    name: "tp",
+    components: [
+      { refDes: "U1", package: "QFN-32" },
+      { refDes: "TP1", package: "TP_SMD_0.75mm", side: "Bottom", x: 10, y: -5 },
+      { refDes: "TP2", side: "Top" },
+      { refDes: "X7", package: "TestPoint_Pad_D1.0mm" },
+      { refDes: "U9", props: { Value: "TPS62130" } },
+      { refDes: "R3", props: { Value: "10k" } },
+      { refDes: "T1", package: "TEST_PAD" },
+    ],
+    nets: [
+      { name: "/I2C/SDA", pins: [["U1", "1"], ["TP1", "1"], ["X7", "1"], ["R3", "1"], ["T1", "1"]] },
+      { name: "GND", pins: [["U1", "2"], ["TP2", "1"], ["U9", "1"], ["R3", "2"]] },
+      { name: "SW", pins: [["U9", "2"]] },
+    ],
+  })
+  const refs = (cs: { refDes: string }[]) => cs.map((c) => c.refDes)
+
+  test("recognises TP refdes and TP/TestPoint footprints, not TPS parts", () => {
+    expect(refs(tpBoard.testPoints())).toEqual(["TP1", "TP2", "X7"])
+  })
+
+  test("lists the test points on one net", () => {
+    expect(refs(tpBoard.testPoints({ net: "/I2C/SDA" }))).toEqual(["TP1", "X7"])
+    expect(refs(tpBoard.testPoints({ net: "SW" }))).toEqual([])
+  })
+
+  test("a refdes pattern replaces the default rule", () => {
+    expect(refs(tpBoard.testPoints({ pattern: /^T\d/ }))).toEqual(["T1"])
+  })
+
+  test("parts with more than two pins are never test points by default", () => {
+    expect(tpBoard.isTestPoint(tpBoard.findComponent("U1")!)).toBe(false)
+  })
+
+  test("formats net, side and position", () => {
+    expect(testPointLine(tpBoard.findComponent("TP1")!)).toBe("TP1 | /I2C/SDA | Bottom | at 10, -5")
   })
 })
 

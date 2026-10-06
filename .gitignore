@@ -4,3 +4,4 @@ designs/*
 native/vendor/
 native/build/
 native/lib/
+native/compile_commands.json
