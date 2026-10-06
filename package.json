@@ -1,0 +1,26 @@
+{
+  "name": "opencode-odbplusplus",
+  "version": "0.1.0",
+  "description": "OpenCode plugin: inspect PCB designs (ODB++) via tool calls, backed by OdbDesignServer",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "server:up": "docker compose -f server/compose.yml up -d --build",
+    "testdata": "bash scripts/export-test-design.sh"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.34",
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

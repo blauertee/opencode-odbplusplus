@@ -1,0 +1,10 @@
+services:
+  odbdesign:
+    build: .
+    image: opencode-odbplusplus/odbdesign-server:local
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      # put ODB++ archives (*.tgz) here
+      - ../designs:/srv/designs
+    restart: unless-stopped
