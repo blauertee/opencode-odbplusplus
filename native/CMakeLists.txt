@@ -12,7 +12,9 @@ set(ODBDESIGN_LIB_ONLY ON CACHE BOOL "" FORCE)
 add_subdirectory(${ODBDESIGN_SOURCE_DIR} odbdesign EXCLUDE_FROM_ALL)
 
 add_library(odbpp SHARED odbpp.cpp)
-target_link_libraries(odbpp PRIVATE OdbDesign Utils)
+# OdbDesign.h pulls in crow.h, but OdbDesign links Crow privately.
+find_package(Crow CONFIG REQUIRED)
+target_link_libraries(odbpp PRIVATE OdbDesign Utils Crow::Crow)
 target_include_directories(odbpp PRIVATE ${ODBDESIGN_SOURCE_DIR}/OdbDesignLib ${ODBDESIGN_SOURCE_DIR}/Utils)
 
 # Ship libodbpp next to libOdbDesign/libUtils and find them via $ORIGIN.

@@ -79,3 +79,16 @@ export function pathsDetail(board: BoardIndex, paths: PathStep[][]): string {
   }
   return lines.join("\n")
 }
+
+/** One line per test point: refdes, net(s), side and position for probing. */
+export function testPointLine(c: BoardComponent): string {
+  const nets = [...new Set(c.pins.values())].map((n) => (n === NO_NET ? "(unconnected)" : n))
+  const bits = [c.refDes, nets.join(", ") || "(no pins)"]
+  if (c.side) bits.push(c.side)
+  if (c.x !== undefined && c.y !== undefined) bits.push(`at ${c.x}, ${c.y}`)
+  return bits.join(" | ")
+}
+
+export function testPointsDetail(heading: string, tps: BoardComponent[]): string {
+  return [`# ${heading} (${tps.length})`, ...tps.map(testPointLine)].join("\n")
+}

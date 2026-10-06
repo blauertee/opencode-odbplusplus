@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
-import { naturalCompare } from "./board.ts"
+import { naturalCompare, toRegex } from "./board.ts"
 import { datasheetText, extractSection } from "./datasheet.ts"
-import { componentDetail, componentSummary, netDetail, pathsDetail } from "./format.ts"
+import { componentDetail, componentSummary, netDetail, pathsDetail, testPointLine, testPointsDetail } from "./format.ts"
 import type { DesignStore } from "./store.ts"
 
 const z = tool.schema
@@ -106,6 +106,49 @@ export function createTools(store: DesignStore) {
         out.push("", `## Nets (${nets.length})`)
         for (const n of nets) out.push(`${n.name} (${n.pins.length} pins)`)
         return out.join("\n")
+      },
+    }),
+
+    odb_testpoints: tool({
+      description:
+        "Test points (test pads) of a PCB design with net, board side and position. With net: the test points on " +
+        "that net ('which test pad do I probe for I2C1_SDA'). With refdes: the net on that test point ('what is on " +
+        "TP21'). With neither: all test points. Test points are recognised by TP<n> refdes or a TP/TestPoint " +
+        "footprint or value on a 1-2 pin part; pass pattern to match refdes differently.",
+      args: {
+        net: z.string().optional().describe("Net name, e.g. 'I2C1_SDA' or '/M.2/M2_M_SMB_DATA'"),
+        refdes: z.string().optional().describe("Test point reference designator, e.g. TP21"),
+        design: designArg,
+        pattern: z
+          .string()
+          .optional()
+          .describe("Refdes substring or regex that marks test points instead of the default rule, e.g. '^(TP|TEST)'"),
+      },
+      async execute(args) {
+        const board = store.get(args.design)
+        const pattern = args.pattern ? toRegex(args.pattern) : undefined
+
+        if (args.refdes) {
+          const c = board.findComponent(args.refdes)
+          if (!c) return notFound(board.components.keys(), args.refdes, "component")
+          if (board.isTestPoint(c, pattern)) return testPointLine(c)
+          return `${c.refDes} is not a test point (${componentSummary(board, c)}). Use odb_component for its pins.`
+        }
+
+        if (args.net) {
+          const nets = board.findNets(args.net)
+          if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
+          if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
+          const net = nets[0].name
+          const tps = board.testPoints({ net, pattern })
+          if (tps.length) return testPointsDetail(`Test points on ${net}`, tps)
+          return `No test point on ${net}. Use odb_net to see what else is on it.`
+        }
+
+        const tps = board.testPoints({ pattern })
+        return tps.length
+          ? testPointsDetail("Test points", tps)
+          : "No test points found. Try pattern with the refdes prefix this design uses."
       },
     }),
 
