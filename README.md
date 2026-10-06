@@ -14,7 +14,7 @@ Plan and background: [docs/PLAN.md](docs/PLAN.md).
 ```bash
 # 1. Build dependencies (Debian/Ubuntu)
 sudo apt install git cmake ninja-build g++ libprotobuf-dev protobuf-compiler \
-                 libarchive-dev zlib1g-dev libasio-dev
+                 libarchive-dev zlib1g-dev libasio-dev libabsl-dev
 
 # 2. Build OdbDesign + the C interface -> native/lib/libodbpp.so
 bun run build:native
@@ -82,4 +82,7 @@ scripts/export-test-design.sh    # re-export the test board from KiCad (Docker)
 ## License
 
 GPL-3.0 (see `LICENSE`). OdbDesign is AGPL-3.0 and is linked into the process (see `docs/PLAN.md`).
-The test board is by Antmicro (Apache-2.0, `testdata/jetson-orin-baseboard.LICENSE`).
+Test boards: `jetson-orin-baseboard` (KiCad export, by Antmicro, Apache-2.0, `testdata/jetson-orin-baseboard.LICENSE`)
+and `altium.pixhawk-fmuv3` (Altium Designer 20.1 export of the Pixhawk FMUv3, CC BY-SA 3.0,
+`testdata/pixhawk-fmuv3.LICENSE`). The Altium export carries no component properties: the Altium
+comment ends up as the part name, so MPN and datasheet lookups return nothing on it.

@@ -48,3 +48,28 @@ describe.skipIf(!built)("jetson-orin-baseboard via libodbpp", () => {
     expect(existsSync(join(root, "testdata", "jetson-orin-baseboard"))).toBe(false)
   })
 })
+
+// Altium Designer 20.1 export; Altium writes no misc/info file.
+describe.skipIf(!built)("altium.pixhawk-fmuv3 via libodbpp", () => {
+  const store = new DesignStore(join(root, "testdata"), "altium.pixhawk-fmuv3")
+
+  test("loads without a misc/info file", () => {
+    const board = store.get()
+    expect(board.components.size).toBe(166)
+    expect(board.nets.size).toBe(249)
+  }, 60_000)
+
+  test("carries the Altium comment as part name and no properties", () => {
+    const board = store.get()
+    const u1001 = board.findComponent("U1001")!
+    expect(u1001.part).toBe("STM32F4X7VX_100_pin")
+    expect(board.findComponent("R1022")!.part).toBe("220R")
+    expect(board.mpn(u1001)).toBeUndefined()
+    expect(board.search("STM32").components.map((c) => c.refDes).sort()).toEqual(["U1001", "U7001"])
+  })
+
+  test("IMU reaches the MCU directly", () => {
+    const board = store.get()
+    expect(board.signalPaths("U4001", "U1001").every((p) => p.map((s) => s.refDes).join(">") === "U4001>U1001")).toBe(true)
+  })
+})
