@@ -1,0 +1,64 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1d5bed2..79ddd8b 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -64,7 +64,10 @@ FetchContent_Declare(
+ )
+ # For Windows: Prevent overriding the parent project's compiler/linker settings
+ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
++option(ODBDESIGN_LIB_ONLY "Build only OdbDesignLib and Utils (no server, app, tests)" OFF)
++if(NOT ODBDESIGN_LIB_ONLY)
+ FetchContent_MakeAvailable(googletest)
++endif()
+ enable_testing()
+ 
+ # Enable Hot Reload for MSVC compilers if supported.
+@@ -106,7 +109,9 @@ endif()
+ 
+ # Include sub-projects.
+ add_subdirectory("OdbDesignLib")
++add_subdirectory("Utils")
++if(NOT ODBDESIGN_LIB_ONLY)
+ add_subdirectory("OdbDesignApp")
+ add_subdirectory("OdbDesignServer")
+-add_subdirectory("Utils")
+ add_subdirectory("OdbDesignTests")
++endif()
+diff --git a/OdbDesignLib/CMakeLists.txt b/OdbDesignLib/CMakeLists.txt
+index 73a1b59..3cdf7c3 100644
+--- a/OdbDesignLib/CMakeLists.txt
++++ b/OdbDesignLib/CMakeLists.txt
+@@ -56,12 +56,13 @@ file(GLOB PROTO_FILES "${PROTO_DIR}/*.proto")
+ message(STATUS "Found proto files: ${PROTO_FILES}")
+ 
+ # Link to Protobuf
+-find_package(Protobuf CONFIG REQUIRED)
++find_package(Protobuf REQUIRED)
+ 
+ # Generate protobuf files with export macro
+ protobuf_generate(
+     TARGET OdbDesign
+     PROTOS ${PROTO_FILES}
++    APPEND_PATH
+     IMPORT_DIRS ${PROTO_DIR}
+     EXPORT_MACRO ODBDESIGN_EXPORT
+ )
+@@ -78,3 +79,5 @@ target_link_libraries(OdbDesign PUBLIC protobuf::libprotobuf)
+ # (see https://github.com/CrowCpp/Crow/issues/661#issuecomment-1702544225)
+ list(REMOVE_ITEM _CROW_ICD "_CROW_ICD-NOTFOUND")
+ set_target_properties(Crow::Crow PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${_CROW_ICD}")
++target_include_directories(OdbDesign PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/protoc)
++target_include_directories(OdbDesign PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+diff --git a/OdbDesignLib/IProtoBuffable.h b/OdbDesignLib/IProtoBuffable.h
+index 5840312..6435035 100644
+--- a/OdbDesignLib/IProtoBuffable.h
++++ b/OdbDesignLib/IProtoBuffable.h
+@@ -90,7 +90,7 @@ namespace Odb::Lib
+ 	inline void IProtoBuffable<TPbMessage>::from_json(const std::string& json)
+ 	{			
+ 		auto pMessage = std::make_unique<TPbMessage>();
+-		auto status = google::protobuf::util::JsonStringToMessage(absl::string_view(json), pMessage.get());
++		auto status = google::protobuf::util::JsonStringToMessage(json, pMessage.get());
+ 		if (!status.ok()) return;		
+ 		from_protobuf(*pMessage);		
+ 	}

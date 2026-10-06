@@ -1,12 +1,12 @@
 // In-memory connectivity index of one ODB++ design.
 //
-// OdbDesignServer gives us the raw product model (nets -> pin connections)
-// and the component layer files (refdes -> properties). The questions an
+// OdbDesign (via native/libodbpp) gives us the product model (nets -> pin
+// connections) and the component layer records (refdes -> properties). The questions an
 // agent asks ("what is IC35 connected to", "what sits between IC10 and IC35")
 // are graph queries, so we build the graph once per design and answer every
 // tool call from memory.
 
-import type { ComponentRecord, Design } from "./client.ts"
+import type { NativeBoard } from "./native.ts"
 
 export interface PinRef {
   refDes: string
@@ -69,43 +69,34 @@ export class BoardIndex {
     readonly railFanout = 40,
   ) {}
 
-  static build(name: string, design: Design, records: ComponentRecord[] = []): BoardIndex {
+  static build(board: NativeBoard, name = board.name): BoardIndex {
     const index = new BoardIndex(name)
 
-    for (const c of design.components ?? []) {
+    for (const c of board.components ?? []) {
       index.components.set(c.refDes, {
         refDes: c.refDes,
-        part: c.partName,
-        package: c.package?.name,
+        part: c.part,
+        package: c.package,
         side: c.side,
+        x: c.x,
+        y: c.y,
         pins: new Map(),
-        properties: {},
+        properties: { ...c.props },
       })
     }
 
-    for (const net of design.nets ?? []) {
+    for (const net of board.nets ?? []) {
       const pins: PinRef[] = []
-      for (const pc of net.pinConnections ?? []) {
-        const refDes = pc.component?.refDes
-        const pin = pc.pin?.name
-        if (!refDes || pin === undefined) continue
+      for (const [refDes, pin] of net.pins) {
         pins.push({ refDes, pin })
         let comp = index.components.get(refDes)
         if (!comp) {
-          comp = { refDes, part: pc.component.partName, package: pc.component.package?.name, pins: new Map(), properties: {} }
+          comp = { refDes, pins: new Map(), properties: {} }
           index.components.set(refDes, comp)
         }
         comp.pins.set(pin, net.name)
       }
       index.nets.set(net.name, { name: net.name, pins })
-    }
-
-    for (const r of records) {
-      const comp = index.components.get(r.compName)
-      if (!comp) continue
-      comp.x = r.locationX
-      comp.y = r.locationY
-      for (const p of r.propertyRecords ?? []) comp.properties[p.name] = p.value ?? ""
     }
 
     return index

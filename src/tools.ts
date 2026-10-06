@@ -9,17 +9,16 @@ const z = tool.schema
 const designArg = z
   .string()
   .optional()
-  .describe("Design name on the OdbDesignServer. Optional when the server holds exactly one design.")
+  .describe("ODB++ archive: file name in the designs directory (extension optional) or a path. Optional when there is only one.")
 
 export function createTools(store: DesignStore) {
   return {
     odb_designs: tool({
-      description: "List the PCB designs (ODB++ archives) available on the OdbDesignServer.",
+      description: "List the PCB designs (ODB++ archives) in the designs directory.",
       args: {},
       async execute() {
-        const designs = await store.list()
-        if (!designs.length) return "No designs on the server."
-        return designs.map((d) => `${d.name}${d.loaded ? " (loaded)" : ""}`).join("\n")
+        const designs = store.list()
+        return designs.length ? designs.join("\n") : "No ODB++ archives in the designs directory."
       },
     }),
 
@@ -33,7 +32,7 @@ export function createTools(store: DesignStore) {
         neighbours: z.number().int().optional().describe("Max neighbour pins listed per net (default 12)"),
       },
       async execute(args) {
-        const board = await store.get(args.design)
+        const board = store.get(args.design)
         const c = board.findComponent(args.refdes)
         if (!c) return notFound(board.components.keys(), args.refdes, "component")
         return componentDetail(board, c, args.neighbours ?? 12)
@@ -49,7 +48,7 @@ export function createTools(store: DesignStore) {
         design: designArg,
       },
       async execute(args) {
-        const board = await store.get(args.design)
+        const board = store.get(args.design)
         const nets = board.findNets(args.net)
         if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
         if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
@@ -73,7 +72,7 @@ export function createTools(store: DesignStore) {
         include_rails: z.boolean().optional().describe("Also walk power/ground nets (default false)"),
       },
       async execute(args) {
-        const board = await store.get(args.design)
+        const board = store.get(args.design)
         for (const ref of [args.from, args.to]) {
           if (!board.findComponent(ref)) return notFound(board.components.keys(), ref, "component")
         }
@@ -100,7 +99,7 @@ export function createTools(store: DesignStore) {
         limit: z.number().int().optional().describe("Max results per category (default 50)"),
       },
       async execute(args) {
-        const board = await store.get(args.design)
+        const board = store.get(args.design)
         const { components, nets } = board.search(args.query, args.limit ?? 50)
         const out: string[] = [`## Components (${components.length})`]
         for (const c of components) out.push(componentSummary(board, c))
@@ -121,7 +120,7 @@ export function createTools(store: DesignStore) {
         design: designArg,
       },
       async execute(args) {
-        const board = await store.get(args.design)
+        const board = store.get(args.design)
         const c = board.findComponent(args.refdes)
         if (!c) return notFound(board.components.keys(), args.refdes, "component")
         const url = board.datasheet(c)

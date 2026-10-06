@@ -18,36 +18,45 @@ Darauf aufbauend: Testabdeckung, Dokumentation und Firmware-Konzeption LLM-gest�
 ```
 OpenCode ──toolcall──▶ Plugin (TypeScript, läuft in OpenCode/Bun)
                          │  BoardIndex: Graph Bauteil ⇄ Pin ⇄ Netz, im Speicher je Design
-                         │  REST (HTTP, JSON)
+                         │  bun:ffi, im selben Prozess
                          ▼
-                       OdbDesignServer (C++, nam20485/OdbDesign, eigener Prozess / Docker)
+                       native/libodbpp  (kleine C-Schnittstelle, native/odbpp.cpp)
+                         │  linkt
+                         ▼
+                       libOdbDesign (C++, nam20485/OdbDesign, nur Library)
                          │  parst
                          ▼
-                       ODB++-Archiv (.tgz) aus KiCad / Altium / Pulsonix
+                       ODB++-Archiv (.tgz/.zip) aus KiCad / Altium / Pulsonix
 ```
 
-Warum so geschnitten:
-
-- **OdbDesign bleibt ein eigener Prozess.** Die Bibliothek ist C++ mit vcpkg/gRPC-Build und AGPL-3.0.
-  Über REST angebunden brauchen wir keine nativen Bindings, und die Lizenzgrenze bleibt sauber
-  (dieses Repo ist GPL-3.0).
-- **Die Graph-Abfragen laufen im Plugin.** Der Server liefert Rohdaten (Netze mit Pin-Verbindungen,
-  Bauteil-Layer mit Properties). Fragen wie „was liegt zwischen A und B" sind Graph-Suchen, die wir
-  einmal pro Design indizieren und dann aus dem Speicher beantworten.
+- **OdbDesign direkt als Library, kein Server.** `native/odbpp.cpp` ist eine C-ABI mit drei
+  Funktionen (`odbpp_load_board`, `odbpp_last_error`, `odbpp_free`). Sie parst das Archiv mit
+  OdbDesign, baut das Produktmodell und gibt genau die Daten zurück, die der Index braucht:
+  Bauteile mit Properties und Position, Netze mit Pins. Für das Testboard sind das 320 KB statt
+  der 16 MB, die die REST-API liefert, geladen in ca. 1 s.
+- **Die Graph-Abfragen laufen im Plugin.** Fragen wie „was liegt zwischen A und B" sind
+  Graph-Suchen, die wir einmal pro Design indizieren und dann aus dem Speicher beantworten.
 - **Kompakte Textausgabe.** Tools liefern zeilenorientierten Text statt JSON. Rails (GND, +3V3, …)
   werden zusammengefasst, damit ein 500-Pin-GND-Netz nicht den Kontext füllt.
+- **Designs liegen als Dateien** in einem Ordner (`designs/` im Projekt, konfigurierbar). OdbDesign
+  entpackt Archive neben sich selbst, deshalb arbeitet das Plugin auf einer Kopie im Cache.
+- **Lizenz.** OdbDesign ist AGPL-3.0 und wird jetzt in den Prozess gelinkt. Dieses Repo ist
+  GPL-3.0; GPL-3.0 §13 erlaubt die Kombination, das Gesamtwerk unterliegt dann für den
+  OdbDesign-Teil der AGPL. Für ein internes Werkzeug unkritisch, bei Weitergabe/Hosting beachten.
 
 Code:
 
 | Datei | Inhalt |
 |---|---|
-| `src/client.ts` | REST-Client für OdbDesignServer |
-| `src/store.ts` | lädt Designs, cached einen `BoardIndex` pro Design |
+| `native/odbpp.cpp` | C-ABI über OdbDesign |
+| `native/build.sh`, `native/CMakeLists.txt` | holt OdbDesign + Crow, wendet Patches an, baut `native/lib/` |
+| `native/patches/` | Parser-Fixes und Library-only-Build für OdbDesign |
+| `src/native.ts` | `bun:ffi`-Anbindung |
+| `src/store.ts` | findet Archive, cached einen `BoardIndex` pro Archiv-Version |
 | `src/board.ts` | Index, Netzauflösung, Rail-Erkennung, Pfadsuche, Suche |
 | `src/format.ts` | Textausgabe der Tools |
 | `src/datasheet.ts` | Datenblatt-Download, `pdftotext`, Kapitel-Extraktion |
 | `src/tools.ts` | Tool-Definitionen für OpenCode |
-| `server/` | Dockerfile + Patches für OdbDesignServer |
 | `testdata/` | Testboard als ODB++ |
 
 ## Testdesign
@@ -70,20 +79,17 @@ mit `U10`/`U35` usw.
    `Manufacturer`, `Datasheet` (URL). Damit sind BOM- und Datenblatt-Tools möglich. Altium/Pulsonix
    benennen die Felder anders; `src/board.ts` hat dafür eine Alias-Liste, die wir mit echten
    Exporten nachschärfen müssen.
-3. **OdbDesign braucht Patches für KiCad-Exporte.** Gefundene Probleme:
+3. **OdbDesign braucht Patches für KiCad-Exporte** (`native/patches/0001-…`, sollten upstream
+   als PR an OdbDesign gehen):
    - Feature-Records ohne Attribut-Teil (`L … P 0` ohne `;…`) → Parse-Error. *Gepatcht.*
    - Leere Attribut-Strings (`&1 `) → Parse-Error. *Gepatcht.*
-   - Property-Werte mit Leerzeichen werden abgeschnitten (`'ROHM Semiconductor'` → `ROHM`). *Offen.*
-   - Absolute Pfade in CLI-Argumenten werden als Flags interpretiert (`/foo` wie `-foo`), deshalb
-     `--designs-dir designs` relativ. *Workaround.*
-   - `+` in Layernamen (`comp_+_top`) muss als `%2B` kodiert werden. *Im Client gelöst.*
-
-   Die beiden Parser-Fixes (`server/patches/0001-…`) sollten upstream als PR an OdbDesign gehen.
-4. **Server-Build.** Das offizielle Image liegt nur auf ghcr.io, der Upstream-Build zieht alle
-   Abhängigkeiten über vcpkg. `server/Dockerfile` baut stattdessen gegen Ubuntus protobuf/gRPC
-   (Patch `0002-…`). Lädt das Testboard in ca. 2 s; `GET /designs/{name}` liefert 16 MB JSON, weil
-   jede Pin-Verbindung das komplette Bauteil inkl. Package einbettet. Für jetzt okay, da einmal pro
-   Design gecached.
+   - Property-Werte mit Leerzeichen wurden abgeschnitten (`'ROHM Semiconductor'` → `ROHM`). *Gepatcht.*
+4. **Build.** Upstream baut alle Abhängigkeiten über vcpkg inkl. gRPC für den Server. Für die
+   Library allein reichen protobuf, libarchive, zlib und das Header-only-Crow; `native/patches/0002-…`
+   ergänzt dafür eine Option `ODBDESIGN_LIB_ONLY` und macht den Build mit den Distro-Paketen
+   (protobuf 3.21) lauffähig. `native/build.sh` dauert ca. 1,5 min.
+5. **Parsen blockiert.** `odbpp_load_board` läuft synchron im OpenCode-Prozess (ca. 1 s für das
+   Testboard, danach aus dem Cache). Für sehr große Boards später in einen Bun-Worker verlegen.
 
 ## Tool-Katalog
 
@@ -92,7 +98,7 @@ mit `U10`/`U35` usw.
 
 | Tool | Status | Zweck |
 |---|---|---|
-| `odb_designs` | ✅ | Designs auf dem Server auflisten |
+| `odb_designs` | ✅ | ODB++-Archive im Design-Ordner auflisten |
 | `odb_component` | ✅ | Bauteil: Wert, MPN, Package, Datenblatt, alle Pins → Netz → Nachbar-Pins |
 | `odb_net` | ✅ | Alles an einem Netz, gruppiert nach Bauteil |
 | `odb_signal_path` | ✅ | Kürzeste Bauteilketten zwischen zwei Bauteilen, ohne Rails, nur über kleine Bauteile (≤ 4 Pins, einstellbar) |
@@ -107,8 +113,8 @@ mit `U10`/`U35` usw.
 
 ## Phasen
 
-**Phase 0 – Setup (dieser Stand).** Repo-Gerüst, OdbDesignServer-Build, Testdesign, sechs Tools,
-Unit- und Integrationstests.
+**Phase 0 – Setup (dieser Stand).** Repo-Gerüst, native Anbindung an OdbDesign, Testdesign,
+sechs Tools, Unit- und Integrationstests.
 
 **Phase 1 – Robustheit.**
 - Pin-Namen ergänzen: optional KiCad-Schaltplan-Netzliste (`kicad-cli sch export netlist`) bzw.
@@ -117,7 +123,8 @@ Unit- und Integrationstests.
 - Rail-Erkennung konfigurierbar machen (Regex + Fanout), Widerstandsarrays in der Pfadsuche
   paarweise statt „alles verbunden" behandeln.
 - Property-Aliase für Altium und Pulsonix an echten Exporten prüfen.
-- Upstream-PRs für die OdbDesign-Parser-Fixes, Property-Truncation fixen.
+- Upstream-PRs für die OdbDesign-Parser-Fixes.
+- Laden in einen Bun-Worker verlegen, macOS-Build (`.dylib`) testen.
 
 **Phase 2 – Use-Case-Tools.** Power-Tree, Bus-Erkennung, Testabdeckung, BOM. Danach Firmware-
 Konzeption: MCU-Pin → Netz → Peripherie als Tabelle, daraus Pin-Config-Header generieren.
@@ -125,11 +132,10 @@ Konzeption: MCU-Pin → Netz → Peripherie als Tabelle, daraus Pin-Config-Heade
 **Phase 3 – Datenblätter.** Robuster Download (Redirects, Landing-Pages, Distributor-Links),
 Kapitel-Split über das Inhaltsverzeichnis, Seiten-Suche statt nur Überschriften, Cache pro MPN.
 
-**Phase 4 – Verteilung.** npm-Paket, CI (Unit-Tests + Integrationstest gegen den Server im
-Docker), OpenCode-Agent/Skill-Prompt „PCB-Review", Doku.
+**Phase 4 – Verteilung.** npm-Paket mit vorgebauten `libodbpp`-Binaries pro Plattform, CI
+(Unit-Tests + Integrationstest gegen das Testboard), OpenCode-Agent/Skill-Prompt „PCB-Review", Doku.
 
 ## Offene Punkte
 
 - Ein echter Export aus Pulsonix und Altium (auch ein kleines Board) zum Prüfen der Property-Namen
   und der OdbDesign-Kompatibilität.
-- Server lokal pro Entwickler (Docker) oder zentral? Der Plugin-Client kann beides (URL + Basic Auth).

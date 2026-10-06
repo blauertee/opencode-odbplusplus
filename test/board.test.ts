@@ -1,27 +1,29 @@
 import { describe, expect, test } from "bun:test"
 import { BoardIndex } from "../src/board.ts"
-import type { Design } from "../src/client.ts"
 import { extractSection } from "../src/datasheet.ts"
+import type { NativeBoard } from "../src/native.ts"
 
 // Tiny board: MCU U1 drives a connector J1 through a series resistor R1 and
 // talks to U2 directly; both ICs sit on +5V and GND, decoupled by C1.
-const pc = (refDes: string, pin: string) => ({ name: `${refDes}-${pin}`, component: { refDes }, pin: { name: pin } })
-const design: Design = {
+const fixture: NativeBoard = {
   name: "tiny",
-  components: ["U1", "U2", "R1", "C1", "J1"].map((refDes) => ({ refDes })),
+  components: [
+    { refDes: "U1", props: { Value: "STM32G0", MPN: "STM32G031K8T6" } },
+    { refDes: "U2" },
+    { refDes: "R1", props: { Value: "33R" } },
+    { refDes: "C1" },
+    { refDes: "J1" },
+  ],
   nets: [
-    { name: "+5V", pinConnections: [pc("U1", "1"), pc("U2", "1"), pc("C1", "1")] },
-    { name: "GND", pinConnections: [pc("U1", "2"), pc("U2", "2"), pc("C1", "2"), pc("J1", "2")] },
-    { name: "/IO/UART_TX", pinConnections: [pc("U1", "3"), pc("R1", "1")] },
-    { name: "/IO/UART_TX_CONN", pinConnections: [pc("R1", "2"), pc("J1", "1")] },
-    { name: "SPI_CLK", pinConnections: [pc("U1", "4"), pc("U2", "3")] },
-    { name: "$NONE$", pinConnections: [pc("U2", "4")] },
+    { name: "+5V", pins: [["U1", "1"], ["U2", "1"], ["C1", "1"]] },
+    { name: "GND", pins: [["U1", "2"], ["U2", "2"], ["C1", "2"], ["J1", "2"]] },
+    { name: "/IO/UART_TX", pins: [["U1", "3"], ["R1", "1"]] },
+    { name: "/IO/UART_TX_CONN", pins: [["R1", "2"], ["J1", "1"]] },
+    { name: "SPI_CLK", pins: [["U1", "4"], ["U2", "3"]] },
+    { name: "$NONE$", pins: [["U2", "4"]] },
   ],
 }
-const board = BoardIndex.build("tiny", design, [
-  { compName: "U1", propertyRecords: [{ name: "Value", value: "STM32G0" }, { name: "MPN", value: "STM32G031K8T6" }] },
-  { compName: "R1", propertyRecords: [{ name: "Value", value: "33R" }] },
-])
+const board = BoardIndex.build(fixture)
 
 describe("BoardIndex", () => {
   test("maps pins to nets", () => {

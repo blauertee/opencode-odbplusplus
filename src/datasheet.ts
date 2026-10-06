@@ -7,7 +7,7 @@ import { existsSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-const CACHE_DIR = process.env.ODB_CACHE_DIR ?? join(homedir(), ".cache", "opencode-odbplusplus", "datasheets")
+const CACHE_DIR = join(process.env.ODB_CACHE_DIR ?? join(homedir(), ".cache", "opencode-odbplusplus"), "datasheets")
 
 export async function datasheetText(url: string): Promise<string> {
   mkdirSync(CACHE_DIR, { recursive: true })
