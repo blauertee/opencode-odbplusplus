@@ -8,6 +8,7 @@ between two components, search, datasheet chapters. Parsing is done by the C++ l
 [OdbDesign](https://github.com/nam20485/OdbDesign), directly inside the OpenCode process via `bun:ffi`.
 
 Plan and background: [docs/PLAN.md](docs/PLAN.md).
+Exporting from Altium Designer so the plugin gets value, MPN and datasheet: [docs/altium-export.md](docs/altium-export.md).
 
 ## Quick start
 
