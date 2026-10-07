@@ -6,7 +6,8 @@
 // are graph queries, so we build the graph once per design and answer every
 // tool call from memory.
 
-import { normalizePropertyName, PROPERTY_ALIASES, type PropertyField } from "./aliases.ts"
+import type { PropertyField } from "./aliases.ts"
+import { builtinMapping, classifyComponent, resolveField, type EffectiveMapping, type ResolvedValue } from "./mapping/rules.ts"
 import type { NativeBoard } from "./native.ts"
 
 export interface PinRef {
@@ -65,6 +66,12 @@ const TEST_POINT_MAX_PINS = 2
 export class BoardIndex {
   readonly components = new Map<string, BoardComponent>()
   readonly nets = new Map<string, BoardNet>()
+  /**
+   * How properties map to fields and which parts/nets are test points, rails
+   * or mechanical. Replaced when a mapping overlay is applied
+   * (src/mapping/overlay.ts); components and nets stay as parsed.
+   */
+  mapping: EffectiveMapping = builtinMapping()
 
   constructor(
     readonly name: string,
@@ -131,6 +138,8 @@ export class BoardIndex {
 
   isRail(netName: string): boolean {
     if (netName === NO_NET) return true
+    const ruled = this.mapping.rails.get(netName)
+    if (ruled !== undefined) return ruled
     const leaf = netName.split("/").pop() ?? netName
     if (RAIL_NAME.test(leaf)) return true
     return (this.nets.get(netName)?.pins.length ?? 0) > this.railFanout
@@ -138,30 +147,46 @@ export class BoardIndex {
 
   // ------------------------------------------------------------ properties
 
+  /** Candidates for a field, best first, with where each came from. */
+  resolve(c: BoardComponent, field: PropertyField): ResolvedValue[] {
+    return resolveField(this.mapping, c, field)
+  }
   value(c: BoardComponent) {
-    return prop(c, "value")[0]
+    return this.resolve(c, "value")[0]?.value
   }
   mpn(c: BoardComponent) {
-    return prop(c, "mpn")[0]
+    return this.resolve(c, "mpn")[0]?.value
   }
   /** Prefers a web link, since odb_datasheet can only download those (Altium's HelpURL is often a network path). */
   datasheet(c: BoardComponent) {
-    const candidates = prop(c, "datasheet")
+    const candidates = this.resolve(c, "datasheet").map((r) => r.value)
     return candidates.find((v) => /^https?:\/\//i.test(v)) ?? candidates[0]
   }
   description(c: BoardComponent) {
-    return prop(c, "description")[0]
+    return this.resolve(c, "description")[0]?.value
+  }
+  manufacturer(c: BoardComponent) {
+    return this.resolve(c, "manufacturer")[0]?.value
+  }
+
+  /** Mounting holes, fiducials, logos: by mapping rule, else parts without a connected pin. */
+  isMechanical(c: BoardComponent): boolean {
+    const ruled = classifyComponent(this.mapping, c, "mechanical")
+    if (ruled !== undefined) return ruled
+    return ![...c.pins.values()].some((n) => n !== NO_NET)
   }
 
   // ----------------------------------------------------------- test points
 
   /**
    * Whether a component is a test point. With a pattern, only the refdes is
-   * matched against it; otherwise TP<n> refdes or a TP/TestPoint footprint or
-   * value on a part with at most two pins.
+   * matched against it; otherwise a mapping rule, else TP<n> refdes or a
+   * TP/TestPoint footprint or value on a part with at most two pins.
    */
   isTestPoint(c: BoardComponent, pattern?: RegExp): boolean {
     if (pattern) return pattern.test(c.refDes)
+    const ruled = classifyComponent(this.mapping, c, "testPoint")
+    if (ruled !== undefined) return ruled
     if (c.pins.size > TEST_POINT_MAX_PINS) return false
     if (TEST_POINT_REFDES.test(c.refDes)) return true
     return [c.package, c.part, this.value(c)].some((s) => s && TEST_POINT_NAME.test(s))
@@ -258,21 +283,6 @@ export class BoardIndex {
     build(dst.refDes, [{ refDes: dst.refDes }])
     return paths
   }
-}
-
-/** Non-empty values of a field, in alias priority order (see src/aliases.ts). */
-function prop(c: BoardComponent, field: PropertyField): string[] {
-  const byName = new Map<string, string>()
-  for (const [k, v] of Object.entries(c.properties)) {
-    const key = normalizePropertyName(k)
-    if (v && v !== "~" && !byName.has(key)) byName.set(key, v)
-  }
-  const values: string[] = []
-  for (const alias of PROPERTY_ALIASES[field]) {
-    const v = byName.get(normalizePropertyName(alias))
-    if (v !== undefined && !values.includes(v)) values.push(v)
-  }
-  return values
 }
 
 /** Treat the query as a regex when it looks like one, else as a case-insensitive substring. */

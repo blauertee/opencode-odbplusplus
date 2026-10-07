@@ -4,10 +4,10 @@
 
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { CACHE_DIR as ROOT } from "./cache.ts"
 
-const CACHE_DIR = join(process.env.ODB_CACHE_DIR ?? join(homedir(), ".cache", "opencode-odbplusplus"), "datasheets")
+const CACHE_DIR = join(ROOT, "datasheets")
 
 export async function datasheetText(url: string): Promise<string> {
   mkdirSync(CACHE_DIR, { recursive: true })

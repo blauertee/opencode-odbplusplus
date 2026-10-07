@@ -1,7 +1,10 @@
-import { tool } from "@opencode-ai/plugin"
-import { naturalCompare, toRegex } from "./board.ts"
+import { tool, type ToolContext } from "@opencode-ai/plugin"
+import { naturalCompare, toRegex, type BoardIndex } from "./board.ts"
 import { datasheetText, extractSection } from "./datasheet.ts"
-import { componentDetail, componentSummary, netDetail, pathsDetail, testPointLine, testPointsDetail } from "./format.ts"
+import { componentDetail, componentSummary, mappingStatus, netDetail, pathsDetail, testPointLine, testPointsDetail } from "./format.ts"
+import type { OpencodeAgentRunner } from "./mapping/agent.ts"
+import { distinctValues } from "./mapping/profile.ts"
+import { outputShape, type MappingOutput, type Target } from "./mapping/schema.ts"
 import type { DesignStore } from "./store.ts"
 
 const z = tool.schema
@@ -11,7 +14,19 @@ const designArg = z
   .optional()
   .describe("ODB++ archive: file name in the designs directory (extension optional) or a path. Optional when there is only one.")
 
-export function createTools(store: DesignStore) {
+export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
+  /** Open the design, run `body` and append the "mapping is being repaired" note if one applies. */
+  const withBoard = async (
+    design: string | undefined,
+    ctx: ToolContext,
+    body: (board: BoardIndex) => string | Promise<string>,
+    waitFor?: Target[],
+  ) => {
+    const { board, note } = await store.open(design, { sessionID: ctx.sessionID, waitFor })
+    const out = await body(board)
+    return note ? `${out}\n\n${note}` : out
+  }
+
   return {
     odb_designs: tool({
       description: "List the PCB designs (ODB++ archives) in the designs directory.",
@@ -31,11 +46,12 @@ export function createTools(store: DesignStore) {
         design: designArg,
         neighbours: z.number().int().optional().describe("Max neighbour pins listed per net (default 12)"),
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        const c = board.findComponent(args.refdes)
-        if (!c) return notFound(board.components.keys(), args.refdes, "component")
-        return componentDetail(board, c, args.neighbours ?? 12)
+      async execute(args, ctx) {
+        return withBoard(args.design, ctx, (board) => {
+          const c = board.findComponent(args.refdes)
+          if (!c) return notFound(board.components.keys(), args.refdes, "component")
+          return componentDetail(board, c, args.neighbours ?? 12)
+        })
       },
     }),
 
@@ -47,12 +63,13 @@ export function createTools(store: DesignStore) {
         net: z.string().describe("Net name"),
         design: designArg,
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        const nets = board.findNets(args.net)
-        if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
-        if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
-        return netDetail(board, nets[0].name)
+      async execute(args, ctx) {
+        return withBoard(args.design, ctx, (board) => {
+          const nets = board.findNets(args.net)
+          if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
+          if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
+          return netDetail(board, nets[0].name)
+        })
       },
     }),
 
@@ -71,21 +88,22 @@ export function createTools(store: DesignStore) {
         max_paths: z.number().int().optional().describe("Max chains returned (default 10)"),
         include_rails: z.boolean().optional().describe("Also walk power/ground nets (default false)"),
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        for (const ref of [args.from, args.to]) {
-          if (!board.findComponent(ref)) return notFound(board.components.keys(), ref, "component")
-        }
-        const paths = board.signalPaths(args.from, args.to, {
-          maxPinsThrough: args.max_pins_through,
-          maxDepth: args.max_depth,
-          maxPaths: args.max_paths,
-          includeRails: args.include_rails,
+      async execute(args, ctx) {
+        return withBoard(args.design, ctx, (board) => {
+          for (const ref of [args.from, args.to]) {
+            if (!board.findComponent(ref)) return notFound(board.components.keys(), ref, "component")
+          }
+          const paths = board.signalPaths(args.from, args.to, {
+            maxPinsThrough: args.max_pins_through,
+            maxDepth: args.max_depth,
+            maxPaths: args.max_paths,
+            includeRails: args.include_rails,
+          })
+          if (!paths.length) {
+            return `No signal chain from ${args.from} to ${args.to} within the limits. Try a larger max_pins_through or max_depth.`
+          }
+          return pathsDetail(board, paths)
         })
-        if (!paths.length) {
-          return `No signal chain from ${args.from} to ${args.to} within the limits. Try a larger max_pins_through or max_depth.`
-        }
-        return pathsDetail(board, paths)
       },
     }),
 
@@ -98,14 +116,22 @@ export function createTools(store: DesignStore) {
         design: designArg,
         limit: z.number().int().optional().describe("Max results per category (default 50)"),
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        const { components, nets } = board.search(args.query, args.limit ?? 50)
-        const out: string[] = [`## Components (${components.length})`]
-        for (const c of components) out.push(componentSummary(board, c))
-        out.push("", `## Nets (${nets.length})`)
-        for (const n of nets) out.push(`${n.name} (${n.pins.length} pins)`)
-        return out.join("\n")
+      async execute(args, ctx) {
+        // A query that looks like a part number needs the MPN mapping.
+        const waitFor: Target[] | undefined = /[a-z]/i.test(args.query) && /\d/.test(args.query) ? ["mpn", "value"] : undefined
+        return withBoard(
+          args.design,
+          ctx,
+          (board) => {
+            const { components, nets } = board.search(args.query, args.limit ?? 50)
+            const out: string[] = [`## Components (${components.length})`]
+            for (const c of components) out.push(componentSummary(board, c))
+            out.push("", `## Nets (${nets.length})`)
+            for (const n of nets) out.push(`${n.name} (${n.pins.length} pins)`)
+            return out.join("\n")
+          },
+          waitFor,
+        )
       },
     }),
 
@@ -114,7 +140,8 @@ export function createTools(store: DesignStore) {
         "Test points (test pads) of a PCB design with net, board side and position. With net: the test points on " +
         "that net ('which test pad do I probe for I2C1_SDA'). With refdes: the net on that test point ('what is on " +
         "TP21'). With neither: all test points. Test points are recognised by TP<n> refdes or a TP/TestPoint " +
-        "footprint or value on a 1-2 pin part; pass pattern to match refdes differently.",
+        "footprint or value on a 1-2 pin part, or by the design's property mapping; pass pattern to match refdes " +
+        "differently.",
       args: {
         net: z.string().optional().describe("Net name, e.g. 'I2C1_SDA' or '/M.2/M2_M_SMB_DATA'"),
         refdes: z.string().optional().describe("Test point reference designator, e.g. TP21"),
@@ -124,31 +151,37 @@ export function createTools(store: DesignStore) {
           .optional()
           .describe("Refdes substring or regex that marks test points instead of the default rule, e.g. '^(TP|TEST)'"),
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        const pattern = args.pattern ? toRegex(args.pattern) : undefined
+      async execute(args, ctx) {
+        return withBoard(
+          args.design,
+          ctx,
+          (board) => {
+            const pattern = args.pattern ? toRegex(args.pattern) : undefined
 
-        if (args.refdes) {
-          const c = board.findComponent(args.refdes)
-          if (!c) return notFound(board.components.keys(), args.refdes, "component")
-          if (board.isTestPoint(c, pattern)) return testPointLine(c)
-          return `${c.refDes} is not a test point (${componentSummary(board, c)}). Use odb_component for its pins.`
-        }
+            if (args.refdes) {
+              const c = board.findComponent(args.refdes)
+              if (!c) return notFound(board.components.keys(), args.refdes, "component")
+              if (board.isTestPoint(c, pattern)) return testPointLine(c)
+              return `${c.refDes} is not a test point (${componentSummary(board, c)}). Use odb_component for its pins.`
+            }
 
-        if (args.net) {
-          const nets = board.findNets(args.net)
-          if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
-          if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
-          const net = nets[0].name
-          const tps = board.testPoints({ net, pattern })
-          if (tps.length) return testPointsDetail(`Test points on ${net}`, tps)
-          return `No test point on ${net}. Use odb_net to see what else is on it.`
-        }
+            if (args.net) {
+              const nets = board.findNets(args.net)
+              if (nets.length === 0) return notFound(board.nets.keys(), args.net, "net")
+              if (nets.length > 1) return `Ambiguous net name, candidates:\n${nets.map((n) => n.name).join("\n")}`
+              const net = nets[0].name
+              const tps = board.testPoints({ net, pattern })
+              if (tps.length) return testPointsDetail(`Test points on ${net}`, tps)
+              return `No test point on ${net}. Use odb_net to see what else is on it.`
+            }
 
-        const tps = board.testPoints({ pattern })
-        return tps.length
-          ? testPointsDetail("Test points", tps)
-          : "No test points found. Try pattern with the refdes prefix this design uses."
+            const tps = board.testPoints({ pattern })
+            return tps.length
+              ? testPointsDetail("Test points", tps)
+              : "No test points found. Try pattern with the refdes prefix this design uses."
+          },
+          ["testPoint"],
+        )
       },
     }),
 
@@ -162,18 +195,86 @@ export function createTools(store: DesignStore) {
         section: z.string().optional().describe("Chapter heading to extract (default: overview)"),
         design: designArg,
       },
-      async execute(args) {
-        const board = store.get(args.design)
-        const c = board.findComponent(args.refdes)
-        if (!c) return notFound(board.components.keys(), args.refdes, "component")
-        const url = board.datasheet(c)
-        if (!url) return `${c.refDes} has no datasheet property. ${componentSummary(board, c)}`
-        const text = await datasheetText(url)
-        if (!args.section) return `datasheet: ${url}\n\n${text.slice(0, 4000)}`
-        const chapter = extractSection(text, args.section)
-        return chapter
-          ? `datasheet: ${url}\n\n${chapter}`
-          : `Section "${args.section}" not found in ${url}. Retry with another heading or without section.`
+      async execute(args, ctx) {
+        return withBoard(
+          args.design,
+          ctx,
+          async (board) => {
+            const c = board.findComponent(args.refdes)
+            if (!c) return notFound(board.components.keys(), args.refdes, "component")
+            const url = board.datasheet(c)
+            if (!url) return `${c.refDes} has no datasheet property. ${componentSummary(board, c)}`
+            const text = await datasheetText(url)
+            if (!args.section) return `datasheet: ${url}\n\n${text.slice(0, 4000)}`
+            const chapter = extractSection(text, args.section)
+            return chapter
+              ? `datasheet: ${url}\n\n${chapter}`
+              : `Section "${args.section}" not found in ${url}. Retry with another heading or without section.`
+          },
+          ["datasheet"],
+        )
+      },
+    }),
+
+    odb_mapping: tool({
+      description:
+        "Show how a design's component properties are mapped to value, MPN, datasheet, description, manufacturer, " +
+        "test points and rails: coverage, detected gaps and the rules in use. action 'repair' re-runs the mapping " +
+        "agent, 'reset' drops its stored result (with conventions: true also the conventions learned on other designs).",
+      args: {
+        design: designArg,
+        action: z.enum(["status", "repair", "reset"]).optional().describe("Default: status"),
+        conventions: z.boolean().optional().describe("With reset: also forget learned property conventions"),
+      },
+      async execute(args, ctx) {
+        const h = store.handle(args.design)
+        if (args.action === "reset") store.mapping.reset(h, !!args.conventions)
+        if (args.action === "repair") {
+          if (!store.mapping.opts.agent) return "The mapping agent is not available in this setup (mappingAgent is off or there is no OpenCode client)."
+          await store.mapping.repair(h, ctx.sessionID)
+        }
+        return mappingStatus(h)
+      },
+    }),
+
+    // ---- tools of the odb-mapper agent (disabled for every other agent, see src/index.ts)
+
+    odb_mapping_profile: tool({
+      description: "Mapping agent only: the design profile you were given, or one section of it.",
+      args: { section: z.string().optional().describe("Top-level key of the profile, e.g. 'properties' or 'gaps'") },
+      async execute(args, ctx) {
+        const run = agent?.state(ctx.sessionID)
+        if (!run) return "Only available to the mapping agent."
+        const value = args.section ? (run.input as unknown as Record<string, unknown>)[args.section] : run.input
+        return JSON.stringify(value ?? `No section ${args.section}`)
+      },
+    }),
+
+    odb_mapping_values: tool({
+      description:
+        "Mapping agent only: all distinct values of one component property, or of the part name or package, with " +
+        "counts and up to three refdes each. Optionally only for one refdes prefix (e.g. 'U', 'FMU-').",
+      args: {
+        property: z.string().optional().describe("Property name"),
+        attribute: z.enum(["part", "package"]).optional().describe("Instead of a property"),
+        prefix: z.string().optional().describe("Refdes prefix as in refdesClasses"),
+      },
+      async execute(args, ctx) {
+        const run = agent?.state(ctx.sessionID)
+        if (!run) return "Only available to the mapping agent."
+        if (!args.property && !args.attribute) return "Pass property or attribute."
+        const rows = distinctValues(run.board, args)
+        if (!rows.length) return "No values."
+        return rows.map((r) => `${r.value} | ${r.count} | ${r.refDes.join(", ")}`).join("\n")
+      },
+    }),
+
+    odb_mapping_submit: tool({
+      description: "Mapping agent only: submit the complete mapping (rules, unresolved, summary). Returns what was accepted.",
+      args: outputShape,
+      async execute(args, ctx) {
+        if (!agent) return "Only available to the mapping agent."
+        return agent.submit(ctx.sessionID, args as MappingOutput)
       },
     }),
   }
