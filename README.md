@@ -10,28 +10,68 @@ between two components, search, datasheet chapters. Parsing is done by the C++ l
 Plan and background: [docs/PLAN.md](docs/PLAN.md).
 Exporting from Altium Designer so the plugin gets value, MPN and datasheet: [docs/altium-export.md](docs/altium-export.md).
 
-## Quick start
+## Install
+
+The plugin is not on npm, and it needs a native library built on your machine, so you install it
+from a clone of this repository and point OpenCode at that clone. Requires
+[Bun](https://bun.sh) and OpenCode.
 
 ```bash
 # 1. Build dependencies (Debian/Ubuntu)
 sudo apt install git cmake ninja-build g++ libprotobuf-dev protobuf-compiler \
                  libarchive-dev zlib1g-dev libasio-dev libabsl-dev
 
-# 2. Build OdbDesign + the C interface -> native/lib/libodbpp.so
-bun run build:native
+# 2. Clone the plugin from GitHub
+git clone https://github.com/blauertee/opencode-odbplusplus ~/.local/share/opencode-odbplusplus
+cd ~/.local/share/opencode-odbplusplus
 
-# 3. Plugin dependencies, provide the test board
+# 3. Install the plugin's dependencies
 bun install
-cp testdata/jetson-orin-baseboard.tgz designs/
+
+# 4. Build OdbDesign + the C interface -> native/lib/libodbpp.so
+#    (clones OdbDesign and Crow into native/vendor/ on first run)
+bun run build:native
 ```
 
-Load it in OpenCode, e.g. in a project at `.opencode/plugins/odbplusplus.ts`:
+Then register the clone in an OpenCode config, either globally in `~/.config/opencode/opencode.json`
+or per project in `opencode.json`. OpenCode loads a plugin from an absolute path to a directory
+with a `package.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["/home/you/.local/share/opencode-odbplusplus"]
+}
+```
+
+Use the absolute path, since `~` is not expanded. Options can be passed as a tuple instead of
+environment variables (names in `src/index.ts`):
+
+```json
+{ "plugin": [["/home/you/.local/share/opencode-odbplusplus", { "designsDir": "hardware/odb" }]] }
+```
+
+Alternatively, drop a file into a plugin directory (`~/.config/opencode/plugins/` or a project's
+`.opencode/plugins/`), e.g. `odbplusplus.ts`:
 
 ```ts
-export { OdbPlusPlusPlugin } from "/path/to/opencode-odbplusplus/src/index.ts"
+export { OdbPlusPlusPlugin } from "/home/you/.local/share/opencode-odbplusplus/src/index.ts"
 ```
 
-This repo already ships that file: starting OpenCode in the repo directory is enough.
+This repo already ships such a file, so starting OpenCode in the repo directory is enough to try it
+on the test board:
+
+```bash
+cp testdata/jetson-orin-baseboard.tgz designs/
+opencode
+```
+
+In your own projects, put ODB++ archives (`*.tgz`, `*.zip`) into a `designs/` folder in the project
+or set `ODB_DESIGNS_DIR`.
+
+**Updating:** `git pull && bun install && bun run build:native` in the clone, then restart OpenCode.
+The native build only re-clones OdbDesign if `native/vendor/OdbDesign` is missing; delete
+`native/vendor/` when the pinned OdbDesign revision in `native/build.sh` changes.
 
 Configuration via environment variables:
 
