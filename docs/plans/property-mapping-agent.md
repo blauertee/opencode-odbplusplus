@@ -246,10 +246,10 @@ from a `propertyAlias`, `partNameAs` or `componentValue` rule, go through three 
 checks feed signal S5 in the health check.
 
 1. **Hard reject** (offline, deterministic). The value is rejected when it:
-   - matches a distributor pattern: Digi-Key `…-ND`, Mouser `\d{2,3}-…`, LCSC `C\d{3,}`,
-     Farnell order codes (all digits, 6–8 long);
-   - is an internal-number pattern: all digits with optional dashes or dots, or a pattern shared
-     by ≥ 80 % of the property's values that also appears under a `PARTNO`-like name;
+   - matches an unambiguous distributor pattern: Digi-Key `…-ND`, LCSC `C\d{3,}`;
+   - comes from a property the agent or the user marked `ignoreProperty` (internal or distributor
+     number), or follows one fixed pattern shared by ≥ 80 % of a property's values that also
+     appears under a `PARTNO`-like name;
    - is a passive value (`10k`, `4k7`, `100nF`, `0u1`), a URL, contains whitespace, or is shorter
      than 4 / longer than 40 characters;
    - equals the component's package name or a placeholder (`~`, `NA`, `DNP`);
@@ -268,6 +268,10 @@ checks feed signal S5 in the health check.
    - an optional local copy of a public part catalogue, e.g. the community jlcparts export of the
      LCSC catalogue, queried by exact MPN. Size, update cadence and license still need checking
      before it becomes a default.
+
+Not hard rejects, because real MPNs look the same: all-digit numbers (Molex `5031820852`, TE
+`1734839`) and a leading `\d{2,3}-` (Mouser order codes, but also TE `2-1734839-1`). These count
+against the value in S5 and leave it `unverified` unless tier 2 or 3 supports it.
 
 Outcome per value: a tier 1 failure rejects the rule (the agent gets the reason and may resubmit);
 tier 2 or 3 evidence stores the value as `verified` with its evidence; no evidence stores it as
@@ -519,7 +523,7 @@ Tests (no model needed except the last):
 
 - Health check: Jetson fires nothing; Pixhawk fires S2, S3, S4; a synthetic board with `PARTNO`,
   `MFGPN`, `Supplier Part Number 1` fires S1 and, with `Part Number` holding digits, S5.
-- MPN validation: distributor numbers, internal numbers and passive values are rejected; `GRM155R71C104KA88D` on an 0603 footprint is rejected, on 0402 verified; a valid MPN with no grammar stays unverified, not rejected.
+- MPN validation: Digi-Key/LCSC numbers, values from ignored properties and passive values are rejected; Molex `5031820852` is not; `GRM155R71C104KA88D` on an 0603 footprint is rejected, on 0402 verified; a valid MPN with no grammar stays unverified, not rejected.
 - Validator: rejects unknown properties and refdes, over-broad test point patterns, invented
   datasheet URLs, `inferred` with `high` confidence, values not found in their cited source.
 - Overlay: applying the Pixhawk example output yields 9 test points, values on all passives, MPN
