@@ -238,6 +238,43 @@ The plugin trusts nothing the agent says without checking it against the parsed 
 After applying, the plugin recomputes the health report and stores before/after coverage with the
 overlay.
 
+### 5.4 MPN validation
+
+No offline check can prove that a string is a real part number. A deterministic check can prove
+that it is *not* one, which covers the mistakes the agent is likely to make. MPN values, whether
+from a `propertyAlias`, `partNameAs` or `componentValue` rule, go through three tiers. The same
+checks feed signal S5 in the health check.
+
+1. **Hard reject** (offline, deterministic). The value is rejected when it:
+   - matches a distributor pattern: Digi-Key `…-ND`, Mouser `\d{2,3}-…`, LCSC `C\d{3,}`,
+     Farnell order codes (all digits, 6–8 long);
+   - is an internal-number pattern: all digits with optional dashes or dots, or a pattern shared
+     by ≥ 80 % of the property's values that also appears under a `PARTNO`-like name;
+   - is a passive value (`10k`, `4k7`, `100nF`, `0u1`), a URL, contains whitespace, or is shorter
+     than 4 / longer than 40 characters;
+   - equals the component's package name or a placeholder (`~`, `NA`, `DNP`);
+   - is inconsistent across the design: one MPN on parts with different values or different
+     packages, or (as a warning, not a reject) different MPNs on parts with the same value and
+     package.
+2. **Positive evidence, offline** (deterministic). `src/mapping/mpn-grammars.ts` ships number
+   grammars for common families (Murata `GRM`/`GCM`, Yageo `RC`/`CC`, Panasonic `ERJ`/`ECJ`,
+   Samsung `CL`, KEMET `C0402…`, Vishay `CRCW`, STM32 / STM8, TI `TPS`/`LM`/`SN74`, Nexperia
+   `74LVC`/`PMEG`). A grammar that decodes the case size or pin count must agree with the
+   footprint (`GRM155…` is 0402, `ERJ2…` is 0402, `RC0603…` is 0603); a mismatch is a hard
+   reject. A match is support only: the grammars will never cover every vendor.
+3. **Positive evidence, network without credentials** (optional, `mpnLookup` option):
+   - the component's datasheet URL is downloaded through the existing `src/datasheet.ts` cache and
+     the MPN, or its base part number without the packaging suffix, must appear in the PDF text;
+   - an optional local copy of a public part catalogue, e.g. the community jlcparts export of the
+     LCSC catalogue, queried by exact MPN. Size, update cadence and license still need checking
+     before it becomes a default.
+
+Outcome per value: a tier 1 failure rejects the rule (the agent gets the reason and may resubmit);
+tier 2 or 3 evidence stores the value as `verified` with its evidence; no evidence stores it as
+`unverified`, and tools print it with that mark. Rejecting everything without positive evidence
+would throw away most valid MPNs, since the offline grammars cover only a few vendors. A rule whose
+values are rejected for more than 30 % of the components it covers is rejected as a whole.
+
 ## 6. Input and output schema
 
 TypeScript types; the zod schemas in `src/mapping/schema.ts` mirror them.
@@ -466,7 +503,8 @@ three sentences and is shown to the user: say what is now mapped and what the ex
 | `src/mapping/schema.ts` | zod schemas for `MappingInput`, `MappingOutput`; `schemaVersion` |
 | `src/mapping/health.ts` | eligibility, value shapes, signals S1–S7, decision; `heuristicVersion` |
 | `src/mapping/profile.ts` | builds `MappingInput` from a `BoardIndex` and the health report, with the caps from 6.1 |
-| `src/mapping/validate.ts` | checks from 5.3, returns accepted rules and rejections |
+| `src/mapping/validate.ts` | checks from 5.3 and 5.4, returns accepted rules and rejections |
+| `src/mapping/mpn-grammars.ts` | distributor and internal-number patterns, vendor MPN grammars with case-size decoding (5.4) |
 | `src/mapping/overlay.ts` | layer merge (4.1), cache files (4.2), apply (4.3) |
 | `src/mapping/agent.ts` | subagent config, session create/prompt, submit wait, timeout, run log |
 | `src/mapping/prompt.ts` | system prompt (section 7), `promptVersion` |
@@ -481,6 +519,7 @@ Tests (no model needed except the last):
 
 - Health check: Jetson fires nothing; Pixhawk fires S2, S3, S4; a synthetic board with `PARTNO`,
   `MFGPN`, `Supplier Part Number 1` fires S1 and, with `Part Number` holding digits, S5.
+- MPN validation: distributor numbers, internal numbers and passive values are rejected; `GRM155R71C104KA88D` on an 0603 footprint is rejected, on 0402 verified; a valid MPN with no grammar stays unverified, not rejected.
 - Validator: rejects unknown properties and refdes, over-broad test point patterns, invented
   datasheet URLs, `inferred` with `high` confidence, values not found in their cited source.
 - Overlay: applying the Pixhawk example output yields 9 test points, values on all passives, MPN
