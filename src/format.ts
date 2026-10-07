@@ -4,6 +4,7 @@
 import { PROPERTY_FIELDS } from "./aliases.ts"
 import { naturalCompare, NO_NET, type BoardComponent, type BoardIndex, type PathStep } from "./board.ts"
 import type { ResolvedValue } from "./mapping/rules.ts"
+import { ANCHOR_MIN_PINS, isGround, type Block, type Bus, type Grouping } from "./overview.ts"
 import type { MappingRule } from "./mapping/schema.ts"
 import type { DesignHandle } from "./mapping/service.ts"
 
@@ -154,4 +155,146 @@ function ruleLine(r: MappingRule): string {
     case "rail":
       return `rail = ${r.value}: ${r.nets.join(", ")}`
   }
+}
+
+// ------------------------------------------------------------ overview
+
+const MAX_LISTED = 12
+
+/** "U6 TPS65988DHRSHR (USB-PD controller...)" for block and bus listings. */
+function partLabel(board: BoardIndex, ref: string, withDescription = false): string {
+  const c = board.components.get(ref)
+  if (!c) return ref
+  const value = board.value(c) ?? c.part
+  const desc = withDescription ? board.description(c) : undefined
+  return [c.refDes, value, desc ? `(${desc.length > 60 ? `${desc.slice(0, 57)}...` : desc})` : ""].filter(Boolean).join(" ")
+}
+
+function listed(items: string[], max = MAX_LISTED): string {
+  return items.length > max ? `${items.slice(0, max).join(", ")} +${items.length - max} more` : items.join(", ")
+}
+
+/** Counts per refdes prefix, e.g. "R 20, C 15, D 2". */
+function prefixCounts(refs: string[]): string {
+  const counts = new Map<string, number>()
+  for (const r of refs) {
+    const p = r.replace(/\d.*$/, "") || r
+    counts.set(p, (counts.get(p) ?? 0) + 1)
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || naturalCompare(a[0], b[0])).map(([p, n]) => `${p} ${n}`).join(", ")
+}
+
+export function overviewDetail(board: BoardIndex, g: Grouping, buses: Bus[], titles = new Map<string, string>()): string {
+  const comps = [...board.components.values()]
+  const connected = comps.filter((c) => !board.isMechanical(c))
+  const sides = new Map<string, number>()
+  for (const c of connected) sides.set(c.side ?? "?", (sides.get(c.side ?? "?") ?? 0) + 1)
+  const placed = connected.filter((c) => c.x !== undefined && c.y !== undefined)
+  const rails = [...board.nets.keys()].filter((n) => n !== NO_NET && board.isRail(n))
+  const withValue = connected.filter((c) => board.value(c)).length
+  const withDesc = connected.filter((c) => board.description(c)).length
+
+  const lines = [`# ${board.name}`]
+  lines.push(
+    `${connected.length} parts (${[...sides].map(([s, n]) => `${n} ${s}`).join(", ")}), ` +
+      `${comps.length - connected.length} mechanical; ${board.nets.size} nets, ${rails.length} of them rails`,
+  )
+  if (placed.length) {
+    const xs = placed.map((c) => c.x!)
+    const ys = placed.map((c) => c.y!)
+    lines.push(`parts span ${(Math.max(...xs) - Math.min(...xs)).toFixed(1)} x ${(Math.max(...ys) - Math.min(...ys)).toFixed(1)}`)
+  }
+  lines.push(`data: value on ${withValue}, description on ${withDesc} of ${connected.length} parts`)
+
+  const byPlacement = (p: string) => [...g.placement.values()].filter((x) => x === p).length
+  lines.push(
+    "",
+    `## Blocks (${g.blocks.length}), inferred from ${g.detail}`,
+    `placed ${byPlacement("direct")} parts directly, ${byPlacement("connectivity")} by connectivity, ` +
+      `${byPlacement("proximity")} by proximity${byPlacement("user") ? `, ${byPlacement("user")} by user correction` : ""}; ${g.unassigned.length} unplaced. Details: odb_block.`,
+  )
+  const shownBlocks = g.blocks.slice(0, 25)
+  for (const b of shownBlocks) {
+    const key = b.anchors.slice(0, 4).map((r) => partLabel(board, r, true))
+    const rails = b.rails.slice(0, 3).map((r) => r.net)
+    const title = titles.get(b.name)
+    lines.push(
+      `- ${b.name}${title ? ` "${title}"` : ""}: ${b.members.length} parts` +
+        (key.length ? ` | ${key.join("; ")}${b.anchors.length > 4 ? ` +${b.anchors.length - 4}` : ""}` : "") +
+        (rails.length ? ` | rails ${rails.join(", ")}` : "") +
+        ` | ${b.boundary.length} nets to other blocks`,
+    )
+  }
+  if (g.blocks.length > shownBlocks.length) {
+    const rest = g.blocks.slice(shownBlocks.length)
+    lines.push(`- ${rest.length} smaller blocks with ${rest.reduce((n, b) => n + b.members.length, 0)} parts: ${listed(rest.map((b) => b.name))}`)
+  }
+
+  lines.push("", `## Interfaces (${buses.length}). Details: odb_interfaces.`)
+  const kinds = new Map<string, Bus[]>()
+  for (const b of buses) kinds.set(b.kind, [...(kinds.get(b.kind) ?? []), b])
+  for (const [kind, list] of kinds) {
+    const nets = list.reduce((n, b) => n + b.nets.length, 0)
+    lines.push(`- ${kind}: ${list.length} buses, ${nets} nets: ${listed(list.map((b) => b.name), 8)}`)
+  }
+
+  const railPins = rails
+    .filter((n) => !isGround(n))
+    .map((n) => ({ n, pins: board.nets.get(n)!.pins.length }))
+    .sort((a, b) => b.pins - a.pins)
+  lines.push("", `## Supply rails (${railPins.length}, ground excluded)`)
+  lines.push(listed(railPins.map((r) => `${r.n} (${r.pins})`), 20))
+  return lines.join("\n")
+}
+
+export function blockDetail(board: BoardIndex, g: Grouping, b: Block, title?: string): string {
+  const how = new Map<string, number>()
+  for (const r of b.members) {
+    const p = g.placement.get(r) ?? "direct"
+    how.set(p, (how.get(p) ?? 0) + 1)
+  }
+  const lines = [
+    `# Block ${b.name}${title ? ` "${title}"` : ""} (${b.members.length} parts, from ${g.detail})`,
+    `placement: ${(["direct", "connectivity", "proximity", "user"] as const).filter((p) => how.has(p)).map((p) => `${how.get(p)} ${p}`).join(", ")}`,
+    "",
+    `## Key parts (${b.anchors.length}, >= ${ANCHOR_MIN_PINS} pins)`,
+  ]
+  for (const r of b.anchors) {
+    const c = board.components.get(r)!
+    lines.push(`${partLabel(board, r, true)} | ${c.pins.size} pins${c.side ? ` | ${c.side}` : ""}`)
+  }
+  const small = b.members.filter((r) => !b.anchors.includes(r))
+  lines.push("", `## Other parts (${small.length}): ${prefixCounts(small)}`)
+  // Small parts with a value are worth listing compactly; they say what the block does (crystals, LEDs, fuses).
+  const valued = small
+    .map((r) => board.components.get(r)!)
+    .filter((c) => !/^[RC]\d/i.test(c.refDes))
+    .map((c) => partLabel(board, c.refDes))
+  if (valued.length) lines.push(listed(valued, 30))
+
+  lines.push("", `## Supply rails (${b.rails.length})`, listed(b.rails.map((r) => `${r.net} (${r.parts} parts)`), 20))
+
+  lines.push("", `## Nets to other blocks (${b.boundary.length})`)
+  for (const x of b.boundary.slice(0, 60)) lines.push(`${x.net} -> ${x.blocks.join(", ")}`)
+  if (b.boundary.length > 60) lines.push(`+${b.boundary.length - 60} more`)
+  return lines.join("\n")
+}
+
+export function interfacesDetail(board: BoardIndex, buses: Bus[], g?: Grouping): string {
+  const lines = [`# Interfaces (${buses.length}), recognised by net names`]
+  let kind = ""
+  for (const b of buses) {
+    if (b.kind !== kind) {
+      kind = b.kind
+      lines.push("", `## ${kind}`)
+    }
+    const blocks = g ? [...new Set(b.endpoints.map((r) => g.blockOf.get(r)).filter(Boolean))] : []
+    const head = `${b.name}: ${b.nets.length} nets${b.diffPairs ? `, ${b.diffPairs} diff pairs` : ""}`
+    lines.push(`- ${head}${blocks.length ? ` | blocks ${blocks.join(", ")}` : ""}`)
+    lines.push(`  nets: ${listed(b.nets, 8)}`)
+    if (b.endpoints.length) lines.push(`  ends: ${listed(b.endpoints.map((r) => partLabel(board, r)), 6)}`)
+    if (b.series.length) lines.push(`  in series: ${listed(b.series, 10)}`)
+    if (b.pulls.length) lines.push(`  to rails (pull-ups, ESD, termination): ${listed(b.pulls, 10)}`)
+  }
+  return lines.join("\n")
 }

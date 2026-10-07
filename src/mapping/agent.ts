@@ -54,8 +54,16 @@ export function agentConfig(model?: string) {
     ...(model ? { model } : {}),
     temperature: 0,
     maxSteps: 12,
+    // `tools` for older OpenCode; current versions only read `permission` from plugin-added agents.
     tools,
-    permission: { edit: "deny" as const, bash: "deny" as const, webfetch: "deny" as const },
+    steps: 12,
+    permission: {
+      "*": "deny" as const,
+      ...Object.fromEntries(Object.entries(tools).filter(([t, on]) => on && t !== "*").map(([t]) => [t, "allow" as const])),
+      edit: "deny" as const,
+      bash: "deny" as const,
+      webfetch: "deny" as const,
+    },
   }
 }
 

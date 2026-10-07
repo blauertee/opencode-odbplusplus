@@ -85,6 +85,9 @@ Configuration via environment variables:
 | `ODB_MAPPING_MODEL` | OpenCode's `small_model` | `provider/model` for the mapping agent |
 | `ODB_MAPPING_DIR` | in the cache | where mapping results per design are stored (e.g. in the project, to commit them) |
 | `ODB_MPN_LOOKUP` | `off` | `datasheet`: also check proposed MPNs against the datasheet PDF |
+| `ODB_UNDERSTANDING_DIR` | in the cache | where the explore agents' saved results per design are stored (e.g. in the project, to commit them) |
+| `ODB_SCHEMATIC` | – | extra schematic files or folders, comma-separated (any file type) |
+| `ODB_EXPLORE_MODEL` | the session's model | `provider/model` for the explore agents |
 
 `odb_datasheet` needs `pdftotext` (package `poppler-utils`).
 
@@ -93,6 +96,9 @@ Configuration via environment variables:
 | Tool | Example |
 |---|---|
 | `odb_designs` | Which designs are in the folder? |
+| `odb_overview` | What is this board, what blocks and interfaces does it have? |
+| `odb_block` | What is in the USB3 block, which nets leave it? |
+| `odb_interfaces` | Which I2C buses exist, where do the CSI lanes go? |
 | `odb_component` | All connections of U35 |
 | `odb_net` | Everything on the +5V net |
 | `odb_signal_path` | Components between U34 and J1 |
@@ -100,6 +106,7 @@ Configuration via environment variables:
 | `odb_testpoints` | Which test pad carries I2C SDA? What is on TP21? All test points |
 | `odb_datasheet` | Description chapter from the U10 datasheet |
 | `odb_mapping` | How are properties mapped on this design, what is missing? Re-run or reset the mapping agent |
+| `odb_understanding` | What do the saved results and user corrections say about this board or the USB3 block? |
 
 Example output of `odb_signal_path { from: "U34", to: "J1" }` on the test board:
 
@@ -116,6 +123,29 @@ Test points are recognised by convention: a `TP<n>` refdes, or a `TP`/`TestPoint
 on a part with at most two pins. `odb_testpoints` takes a `pattern` (refdes regex) for designs that
 name them differently. The ODB++ `.test_point` pad attribute is not read yet; none of the exports we
 have use it.
+
+Start with `odb_overview` for a bird's-eye view: functional blocks inferred from schematic sheet
+names in net names (KiCad), per-sheet refdes numbering (Altium) or connectivity, plus interfaces
+recognised by net names. See [docs/features/board-overview.md](docs/features/board-overview.md).
+
+## Exploring a board
+
+Three subagents ship with the plugin. They are not primary agents: your own agent launches them,
+or you call them with `@`.
+
+| Agent | What it does |
+|---|---|
+| `@odb-explore` | Works out what the board is for, its blocks, how they connect and power. Launches `odb-block-explore` per block in parallel and saves the result. |
+| `@odb-block-explore USB3` | Explores one block and saves the result. |
+| `@odb-understanding-fix` | Records a correction from you and rewrites every saved result it affects. Your agent must launch it when you correct something it read from the saved understanding. |
+
+Saved results are reused across sessions; `odb_understanding` shows them and marks stale ones.
+Your corrections live in `<design>.understanding.md` next to the archive. You can edit it by hand;
+its `title:`, `function:` and `parts: +R12 -U19` lines override the agents and the block grouping.
+A schematic in any format can be put next to the archive as `<design>.schematic.<ext>` (PDF, Markdown,
+text, …) or set with `ODB_SCHEMATIC`. The plugin never parses it; the agents read it with whatever
+tools your OpenCode setup has. The plugin sets `subagent_depth: 2` unless you set it, so
+`odb-explore` can launch subagents. Details: [docs/features/board-exploration.md](docs/features/board-exploration.md).
 
 ## Property mapping
 

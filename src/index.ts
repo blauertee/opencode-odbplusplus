@@ -4,6 +4,8 @@ import { datasheetText } from "./datasheet.ts"
 import { AGENT_NAME, AGENT_TOOLS, agentConfig, OpencodeAgentRunner } from "./mapping/agent.ts"
 import { MappingCache } from "./mapping/overlay.ts"
 import { MappingService } from "./mapping/service.ts"
+import { applyExploreConfig } from "./explore/agents.ts"
+import { UnderstandingService } from "./explore/service.ts"
 import { DesignStore } from "./store.ts"
 import { createTools } from "./tools.ts"
 
@@ -24,6 +26,13 @@ import { createTools } from "./tools.ts"
  *   mappingTimeoutMs                     max agent run time (180000)
  *   mpnLookup    / ODB_MPN_LOOKUP        "datasheet": also verify MPNs against datasheet text
  *                                        (downloads PDFs, no credentials); default "off"
+ *   understandingDir / ODB_UNDERSTANDING_DIR  where explore results per design are stored,
+ *                                        default in the cache
+ *   schematic    / ODB_SCHEMATIC         extra schematic files or folders (comma-separated or a
+ *                                        list), besides <design>.schematic.* next to the archive
+ *   exploreModel / ODB_EXPLORE_MODEL     "provider/model" for the explore agents, default the session's
+ *   blockExploreModel, fixModel          per-agent overrides of exploreModel
+ *   exploreMaxSubagents                  block subagents per odb-explore run (12)
  */
 export const OdbPlusPlusPlugin: Plugin = async (input, options = {}) => {
   const opt = (key: string, env?: string) => (options[key] as string | undefined) ?? (env ? process.env[env] : undefined)
@@ -45,14 +54,37 @@ export const OdbPlusPlusPlugin: Plugin = async (input, options = {}) => {
   })
   const store = new DesignStore(designsDir, opt("design", "ODB_DESIGN"), undefined, mapping)
 
-  return {
-    tool: createTools(store, agent),
+  const understandingDir = opt("understandingDir", "ODB_UNDERSTANDING_DIR")
+  const schematic = options.schematic ?? process.env.ODB_SCHEMATIC
+  const understanding = new UnderstandingService({
+    designsDir,
+    cacheDir: understandingDir ? path(understandingDir) : undefined,
+    schematics: (Array.isArray(schematic) ? schematic : typeof schematic === "string" ? schematic.split(",") : [])
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .map(path),
+  })
+  const exploreModel = opt("exploreModel", "ODB_EXPLORE_MODEL")
 
-    // Register the mapping agent and keep its tools away from every other agent.
+  return {
+    tool: createTools(store, agent, understanding),
+
+    // Register the agents and keep their write tools away from every other agent.
     async config(config) {
       const own = agentConfig(model ?? config.small_model)
       config.agent = { ...config.agent, [AGENT_NAME]: { ...own, ...config.agent?.[AGENT_NAME] } }
       config.tools = { ...config.tools, ...Object.fromEntries(AGENT_TOOLS.map((t) => [t, false])) }
+      // Current OpenCode reads permissions, not tools, once plugins have run; last matching rule wins.
+      const perm = (config as Record<string, any>).permission
+      const deny = Object.fromEntries(AGENT_TOOLS.map((t) => [t, "deny" as const]))
+      ;(config as Record<string, any>).permission = typeof perm === "string" ? { "*": perm, ...deny } : { ...perm, ...deny }
+
+      applyExploreConfig(config as Record<string, any>, {
+        exploreModel,
+        blockModel: opt("blockExploreModel"),
+        fixModel: opt("fixModel"),
+        maxSubagents: num("exploreMaxSubagents", 12),
+      })
     },
   }
 }
