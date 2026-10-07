@@ -40,6 +40,14 @@ export const PROPERTY_ALIASES = {
     "Description",
     "Desc",
   ],
+  manufacturer: [
+    "Manufacturer", // KiCad test board
+    "Manufacturer 1", // Altium supplier links, CERN library ("Manufacturer1")
+    "Manufacturer Name",
+    "Mfr",
+    "Mfg",
+    "MFR Name",
+  ],
 } as const satisfies Record<string, readonly string[]>
 
 export type PropertyField = keyof typeof PROPERTY_ALIASES
@@ -48,3 +56,50 @@ export type PropertyField = keyof typeof PROPERTY_ALIASES
 export function normalizePropertyName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, "")
 }
+
+export const PROPERTY_FIELDS = Object.keys(PROPERTY_ALIASES) as PropertyField[]
+
+// Property names that carry no canonical field. The mapping health check
+// (src/mapping/health.ts) does not treat them as unmapped data.
+export const IGNORED_PROPERTIES = [
+  "Author",
+  "License",
+  "Tolerance",
+  "Voltage",
+  "Current",
+  "Dielectric",
+  "Power",
+  "Color",
+  "Size",
+  "Pitch",
+  "Public",
+  "IMax",
+  "ISat",
+  "Max. Curr.",
+  "Footprint",
+  "Footprint Library",
+  "Library Name",
+  "Library Reference",
+  "Library Path",
+  "Sim.Device",
+  "Sim.Pins",
+  "Sim.Type",
+  "Sim.Params",
+  "Spice_Model",
+  "Published",
+  "Revision",
+  "Status",
+  "Height",
+  "Package",
+  "Case",
+  "Temperature",
+]
+
+// Refdes prefixes of component classes (IEEE 315 / IPC plus common EDA
+// habits). Parts with other prefixes count as "unclassified" for the
+// mapping health check.
+export const KNOWN_REFDES_PREFIXES = [
+  "A", "ANT", "B", "BT", "BAT", "C", "CN", "CON", "D", "DS", "E", "F", "FB", "FD", "FID", "FL", "FUSE",
+  "H", "HS", "IC", "J", "JP", "K", "L", "LED", "LS", "M", "MH", "MK", "MOV", "P", "PS", "Q", "R", "RLY",
+  "RN", "RV", "RT", "S", "SP", "SW", "T", "TC", "TP", "TR", "U", "V", "VR", "W", "X", "XTAL", "Y", "Z", "ZD",
+]

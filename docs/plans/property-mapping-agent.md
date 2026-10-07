@@ -1,6 +1,6 @@
 # Plan: property-mapping repair agent
 
-Status: plan, not implemented.
+Status: implemented (`src/mapping/`). Section 8 lists where each part lives and what differs from the plan.
 
 ODB++ carries component properties verbatim from the EDA tool, and every tool and part library
 names them differently. Today `src/aliases.ts` maps names to the fields the plugin uses, and
@@ -130,7 +130,8 @@ Highest priority last:
    `ignoreProperty` with confidence `high` are promoted here.
 3. **Design overlay** (per design revision): everything the agent proposed and the validator
    accepted for this design.
-4. **User overrides** (per design, hand-written): same format as the overlay, never written by
+4. **User overrides** (per design, hand-written): `{ "rules": [...] }` with the rule format of
+   section 6.2, never written by
    the agent. Wins over everything, and the agent sees it as fixed input.
 
 ### 4.2 Keys and files
@@ -256,7 +257,7 @@ checks feed signal S5 in the health check.
    - is inconsistent across the design: one MPN on parts with different values or different
      packages, or (as a warning, not a reject) different MPNs on parts with the same value and
      package.
-2. **Positive evidence, offline** (deterministic). `src/mapping/mpn-grammars.ts` ships number
+2. **Positive evidence, offline** (deterministic). `src/mapping/mpn.ts` ships number
    grammars for common families (Murata `GRM`/`GCM`, Yageo `RC`/`CC`, Panasonic `ERJ`/`ECJ`,
    Samsung `CL`, KEMET `C0402…`, Vishay `CRCW`, STM32 / STM8, TI `TPS`/`LM`/`SN74`, Nexperia
    `74LVC`/`PMEG`). A grammar that decodes the case size or pin count must agree with the
@@ -416,8 +417,8 @@ Example output for the Pixhawk export:
   "rules": [
     { "kind": "partNameAs", "field": "value", "scope": { "refdesPrefixes": ["R", "C", "L", "RN", "F", "LED"] }, "confidence": "high",
       "evidence": { "refDes": ["R1022", "C10001", "RN2002"], "note": "Altium writes the Comment as part name; on passives it is the value (220R, 10u/25V, 10K/0.1%)." } },
-    { "kind": "partNameAs", "field": "mpn", "scope": { "refdesPrefixes": ["U", "D", "Q", "X"] }, "confidence": "medium",
-      "evidence": { "refDes": ["U10001", "D10001"], "note": "Part names on ICs and diodes are orderable part numbers (BQ24313, PMEG2005CT)." } },
+    { "kind": "partNameAs", "field": "mpn", "scope": { "refdes": ["U10001", "D10001", "U4001", "U4002"] }, "confidence": "medium",
+      "evidence": { "refDes": ["U10001", "D10001"], "note": "These part names are orderable part numbers (BQ24313, PMEG2005CT); other IC Comments are library names." } },
     { "kind": "classify", "feature": "testPoint", "value": true,
       "match": { "part": ["PAD.04"] }, "confidence": "high",
       "evidence": { "refDes": ["FMU-SWCLK", "IO-SWDIO", "TX5"], "note": "One-pad PAD.04 parts named after the signal they expose (SWD, UART, supply)." } },
@@ -496,42 +497,57 @@ Features:
 9. Submit once with everything. If the submit result lists rejected items, fix or drop exactly
    those and submit again. You have at most three submits.
 
+## Checks the tools run on your submit
+- MPN values are checked without network access. Component values, distributor numbers (Digi-Key,
+  LCSC), links, footprint names and strings with spaces are refused. Part numbers of known families
+  (Murata, Samsung, Yageo, KEMET, Vishay, Panasonic, STM32, ...) must follow their numbering and
+  agree with the footprint's case size or pin count. A rule is refused when more than 30 % of its
+  MPN values fail; MPNs that pass but match no known family are kept as unverified.
+- A refdes prefix is the leading letters plus a following $, - or _ (U$2 -> U$, FMU-SWCLK -> FMU-),
+  as listed in refdesClasses.
+- In a classify match all given criteria must hold; within one list any entry may match.
+
 Write evidence notes, unresolved details and the summary in plain English. The summary is at most
 three sentences and is shown to the user: say what is now mapped and what the export lacks.
 ```
 
-## 8. Implementation outline
+## 8. Implementation
 
-| File | Change |
+| File | Contents |
 |---|---|
-| `src/mapping/schema.ts` | zod schemas for `MappingInput`, `MappingOutput`; `schemaVersion` |
-| `src/mapping/health.ts` | eligibility, value shapes, signals S1–S7, decision; `heuristicVersion` |
-| `src/mapping/profile.ts` | builds `MappingInput` from a `BoardIndex` and the health report, with the caps from 6.1 |
-| `src/mapping/validate.ts` | checks from 5.3 and 5.4, returns accepted rules and rejections |
-| `src/mapping/mpn-grammars.ts` | distributor and internal-number patterns, vendor MPN grammars with case-size decoding (5.4) |
-| `src/mapping/overlay.ts` | layer merge (4.1), cache files (4.2), apply (4.3) |
-| `src/mapping/agent.ts` | subagent config, session create/prompt, submit wait, timeout, run log |
-| `src/mapping/prompt.ts` | system prompt (section 7), `promptVersion` |
-| `src/aliases.ts` | add `manufacturer`, an ignore list, the refdes class table |
-| `src/board.ts` | `resolved` fields, overlay-aware `isTestPoint`/`isRail`/`isMechanical`; raw `properties` unchanged |
-| `src/store.ts` | content fingerprint, overlay load, background run, wait for gapped tools |
-| `src/tools.ts` | `odb_mapping` (health/overlay/repair/reset), agent-only tools, the "being repaired" note |
-| `src/index.ts` | `config` hook registering `odb-mapper`; options `mappingAgent`, `mappingModel`, `mappingDir`, `mappingWaitMs`, `mappingTimeoutMs` |
-| `src/format.ts` | mark inferred values; show value source in `odb_component` |
+| `src/mapping/schema.ts` | zod schemas for the output (also the `odb_mapping_submit` arguments), input types, `SCHEMA_VERSION` |
+| `src/mapping/rules.ts` | effective mapping: layer merge, field resolution with source, classification, refdes prefixes |
+| `src/mapping/health.ts` | eligibility, value shapes, signals S1–S7, decision; `HEURISTIC_VERSION` |
+| `src/mapping/mpn.ts` | MPN tiers 1–3: value/distributor/library-name rejects, family grammars with case size and pin count |
+| `src/mapping/profile.ts` | builds `MappingInput` with the caps from 6.1; distinct values for `odb_mapping_values` |
+| `src/mapping/validate.ts` | checks from 5.3 and 5.4, accepted rules, rejections, MPN verification |
+| `src/mapping/overlay.ts` | cache files (4.2), conventions, user overrides, applying layers (4.3) |
+| `src/mapping/agent.ts` | `odb-mapper` agent config, child session, submit routing, timeout |
+| `src/mapping/prompt.ts` | system prompt (section 7), `PROMPT_VERSION`, target definitions |
+| `src/mapping/service.ts` | per design: apply layers, health, background repair, waiting tools, storing results |
+| `src/board.ts` | `mapping` on `BoardIndex`, `resolve()`, `manufacturer()`, `isMechanical()`, mapping-aware test points and rails |
+| `src/store.ts` | content fingerprint, `open()` for tools (starts and waits for repairs) |
+| `src/tools.ts` | `odb_mapping` (status/repair/reset), agent-only tools, the "being repaired" note |
+| `src/index.ts` | `config` hook registering `odb-mapper` and hiding its tools; plugin options |
+| `src/format.ts` | value provenance in `odb_component`, `odb_mapping` report |
 
-Tests (no model needed except the last):
+Differences from the plan:
 
-- Health check: Jetson fires nothing; Pixhawk fires S2, S3, S4; a synthetic board with `PARTNO`,
-  `MFGPN`, `Supplier Part Number 1` fires S1 and, with `Part Number` holding digits, S5.
-- MPN validation: Digi-Key/LCSC numbers, values from ignored properties and passive values are rejected; Molex `5031820852` is not; `GRM155R71C104KA88D` on an 0603 footprint is rejected, on 0402 verified; a valid MPN with no grammar stays unverified, not rejected.
-- Validator: rejects unknown properties and refdes, over-broad test point patterns, invented
-  datasheet URLs, `inferred` with `high` confidence, values not found in their cited source.
-- Overlay: applying the Pixhawk example output yields 9 test points, values on all passives, MPN
-  on ICs marked inferred; original `properties` and the archive bytes are unchanged.
-- Cache: same fingerprint and versions skip the run; a `heuristicVersion` bump re-runs only while
-  signals still fire; an `unresolved`-only result prevents relaunch.
-- Agent (integration, opt-in with `ODB_MAPPING_E2E=1`): one real run against the Pixhawk export
-  through a local OpenCode server; asserts the submit validates and the test point gap closes.
+- MPN tier 1 also rejects values without digits and library or description names written as part
+  names (`Crystal_Oscillator_in_3.2x2.5_SMD`, `MMBT3906*SMD`, `ST_STM32F101/103_48pin_LQFP`). The
+  Pixhawk export has several of these, so a `partNameAs mpn` rule over all ICs is refused and the
+  agent has to list the parts whose Comment is a real part number.
+- MPN verification is stored per refdes and value, so a user override with another MPN is not
+  shown as verified.
+- Tier 3 is the datasheet check only (`mpnLookup: "datasheet"`). The offline catalogue is not
+  implemented.
+- The end-to-end run with a real model is not automated. `test/mapping.test.ts` drives the agent
+  runner with a stand-in OpenCode client, and the Pixhawk test feeds a fixed proposal through the
+  validator.
+
+Tests in `test/mapping.test.ts`: MPN checks, health signals on fixtures and both test boards,
+validator rejections, layer merge, user overrides, cache reuse without a second run, archive bytes
+unchanged, plugin config hook, agent runner with resubmits.
 
 ## 9. Open points
 

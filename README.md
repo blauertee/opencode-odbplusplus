@@ -40,7 +40,11 @@ Configuration via environment variables:
 | `ODB_DESIGNS_DIR` | `designs` in the project | folder with the ODB++ archives (`*.tgz`, `*.zip`) |
 | `ODB_DESIGN` | – | default design, otherwise the only one in the folder |
 | `ODBPP_LIB` | `native/lib/libodbpp.so` | path to the built library |
-| `ODB_CACHE_DIR` | `~/.cache/opencode-odbplusplus` | working copies of archives, datasheets |
+| `ODB_CACHE_DIR` | `~/.cache/opencode-odbplusplus` | working copies of archives, datasheets, mapping results |
+| `ODB_MAPPING_AGENT` | `auto` | `off`: never start the mapping agent on its own |
+| `ODB_MAPPING_MODEL` | OpenCode's `small_model` | `provider/model` for the mapping agent |
+| `ODB_MAPPING_DIR` | in the cache | where mapping results per design are stored (e.g. in the project, to commit them) |
+| `ODB_MPN_LOOKUP` | `off` | `datasheet`: also check proposed MPNs against the datasheet PDF |
 
 `odb_datasheet` needs `pdftotext` (package `poppler-utils`).
 
@@ -55,6 +59,7 @@ Configuration via environment variables:
 | `odb_search` | Where is the TUSB1046? Which nets are named `*I2C*`? |
 | `odb_testpoints` | Which test pad carries I2C SDA? What is on TP21? All test points |
 | `odb_datasheet` | Description chapter from the U10 datasheet |
+| `odb_mapping` | How are properties mapped on this design, what is missing? Re-run or reset the mapping agent |
 
 Example output of `odb_signal_path { from: "U34", to: "J1" }` on the test board:
 
@@ -71,6 +76,27 @@ Test points are recognised by convention: a `TP<n>` refdes, or a `TP`/`TestPoint
 on a part with at most two pins. `odb_testpoints` takes a `pattern` (refdes regex) for designs that
 name them differently. The ODB++ `.test_point` pad attribute is not read yet; none of the exports we
 have use it.
+
+## Property mapping
+
+EDA tools name component properties differently, so the plugin maps them to the fields its tools
+use (value, MPN, datasheet, description, manufacturer) and recognises test points, rails and
+mechanical parts. Built-in names are in `src/aliases.ts`. When a design still looks under-mapped
+(e.g. unknown property names that hold part numbers, no test points found, or values only in the
+part name, as in Altium exports without parameters), the plugin starts the `odb-mapper` agent in a
+child session. The agent proposes rules; the plugin checks every rule against the data, including
+offline MPN checks, and stores the accepted ones as an overlay keyed by the archive's SHA-256. The
+archive itself is never changed. Details: [docs/plans/property-mapping-agent.md](docs/plans/property-mapping-agent.md).
+
+To fix a mapping by hand, put `<design>.mapping.json` next to the archive. It takes the same rules
+and always wins:
+
+```json
+{ "rules": [
+  { "kind": "propertyAlias", "field": "mpn", "property": "PARTNO_MFR", "confidence": "high", "evidence": { "note": "manual" } },
+  { "kind": "classify", "feature": "testPoint", "value": true, "match": { "part": ["PAD.04"] }, "confidence": "high", "evidence": { "note": "manual" } }
+] }
+```
 
 ## Development
 
