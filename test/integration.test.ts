@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { detectInterfaces, findBlock, groupBlocks } from "../src/overview.ts"
 import { DesignStore } from "../src/store.ts"
 
 const root = join(import.meta.dir, "..")
@@ -44,6 +45,26 @@ describe.skipIf(!built)("jetson-orin-baseboard via libodbpp", () => {
     expect(board.testPoints({ net: "DP1_HPD" }).map((c) => c.refDes)).toEqual(["TP21"])
   })
 
+  test("groups parts by the KiCad schematic sheets", () => {
+    const g = groupBlocks(store.get())
+    expect(g.source).toBe("sheet")
+    expect(g.blocks.map((b) => b.name).sort()).toEqual(
+      ["CSI", "Ethernet", "HDMI", "M.2", "Peripherals", "SoM", "Supply", "USB3", "USB_Debug,_DP"],
+    )
+    expect(g.unassigned.length).toBeLessThan(40)
+    expect(findBlock(g, "Supply")!.anchors).toEqual(expect.arrayContaining(["U1", "U40", "U29", "U48"]))
+    expect(findBlock(g, "U17")!.name).toBe("USB3")
+  })
+
+  test("finds the camera, Ethernet and I2C buses by net name", () => {
+    const buses = detectInterfaces(store.get())
+    const csi0 = buses.find((b) => b.name === "CSI0")!
+    expect(csi0.kind).toBe("MIPI CSI/DSI")
+    expect(csi0.diffPairs).toBeGreaterThanOrEqual(3)
+    expect(buses.find((b) => b.name === "GBE")!.endpoints).toEqual(expect.arrayContaining(["J6", "J15"]))
+    expect(buses.find((b) => b.name === "GPIOEX_I2C")!.series).toEqual(["R215", "R216"])
+  })
+
   test("leaves the designs directory untouched", () => {
     expect(existsSync(join(root, "testdata", "jetson-orin-baseboard"))).toBe(false)
   })
@@ -66,6 +87,18 @@ describe.skipIf(!built)("altium.pixhawk-fmuv3 via libodbpp", () => {
     expect(board.findComponent("R1022")!.part).toBe("220R")
     expect(board.mpn(u1001)).toBeUndefined()
     expect(board.search("STM32").components.map((c) => c.refDes).sort()).toEqual(["U1001", "U7001"])
+  })
+
+  test("groups parts by the per-sheet refdes numbering", () => {
+    const g = groupBlocks(store.get())
+    expect(g.source).toBe("refdesBand")
+    expect(g.blocks).toHaveLength(10)
+    expect(findBlock(g, "4xxx")!.anchors.sort()).toEqual(["U4001", "U4002", "U4003"])
+  })
+
+  test("finds the CAN buses through the transceivers", () => {
+    const buses = detectInterfaces(store.get())
+    expect(buses.find((b) => b.name === "CAN1")!.endpoints).toEqual(["U1001", "U3004"])
   })
 
   test("IMU reaches the MCU directly", () => {

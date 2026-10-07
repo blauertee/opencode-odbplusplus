@@ -1,10 +1,22 @@
 import { tool, type ToolContext } from "@opencode-ai/plugin"
 import { naturalCompare, toRegex, type BoardIndex } from "./board.ts"
 import { datasheetText, extractSection } from "./datasheet.ts"
-import { componentDetail, componentSummary, mappingStatus, netDetail, pathsDetail, testPointLine, testPointsDetail } from "./format.ts"
+import {
+  blockDetail,
+  componentDetail,
+  componentSummary,
+  interfacesDetail,
+  mappingStatus,
+  netDetail,
+  overviewDetail,
+  pathsDetail,
+  testPointLine,
+  testPointsDetail,
+} from "./format.ts"
 import type { OpencodeAgentRunner } from "./mapping/agent.ts"
 import { distinctValues } from "./mapping/profile.ts"
 import { outputShape, type MappingOutput, type Target } from "./mapping/schema.ts"
+import { detectInterfaces, findBlock, groupBlocks } from "./overview.ts"
 import type { DesignStore } from "./store.ts"
 
 const z = tool.schema
@@ -131,6 +143,83 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
             return out.join("\n")
           },
           waitFor,
+        )
+      },
+    }),
+
+    odb_overview: tool({
+      description:
+        "Bird's-eye view of a PCB design: what the board is and does. Lists inferred functional blocks (from " +
+        "schematic sheet names in net names, per-sheet refdes numbering, or connectivity around ICs and " +
+        "connectors) with their key parts, the interfaces found by net names (USB, PCIe, I2C, SPI, ...) and the " +
+        "supply rails. Start here before drilling into components; then use odb_block and odb_interfaces.",
+      args: { design: designArg },
+      async execute(args, ctx) {
+        return withBoard(args.design, ctx, (board) => overviewDetail(board, groupBlocks(board), detectInterfaces(board)), [
+          "value",
+          "description",
+        ])
+      },
+    }),
+
+    odb_block: tool({
+      description:
+        "One functional block from odb_overview: its key parts (ICs, connectors) with value and description, the " +
+        "other parts by type, supply rails, and every signal net that leaves the block with the blocks on the " +
+        "other side. Name the block as odb_overview lists it (e.g. 'USB3', '7xxx', 'U6'), or pass a refdes to " +
+        "get the block that part belongs to.",
+      args: {
+        block: z.string().describe("Block name from odb_overview, or a member refdes"),
+        design: designArg,
+      },
+      async execute(args, ctx) {
+        return withBoard(
+          args.design,
+          ctx,
+          (board) => {
+            const g = groupBlocks(board)
+            const b = findBlock(g, args.block)
+            if (!b) {
+              const placed = board.findComponent(args.block)
+              if (placed && g.unassigned.includes(placed.refDes)) return `${placed.refDes} is not placed in any block.`
+              return `No block named ${args.block}. Blocks: ${g.blocks.map((x) => x.name).join(", ")}`
+            }
+            return blockDetail(board, g, b)
+          },
+          ["value", "description"],
+        )
+      },
+    }),
+
+    odb_interfaces: tool({
+      description:
+        "Interface buses recognised by net names (MIPI CSI/DSI, HDMI, DisplayPort, PCIe, USB, Ethernet, SD, " +
+        "JTAG, I2S, CAN, I2C, SPI, UART): per bus its nets, differential pairs, the ICs/connectors at its ends " +
+        "(seen through series resistors), series parts and pull-ups. Filter by kind or by a part on the bus.",
+      args: {
+        kind: z.string().optional().describe("Interface kind or bus name substring, e.g. 'I2C', 'USB', 'CSI0'"),
+        refdes: z.string().optional().describe("Only buses that end at or pass through this part"),
+        design: designArg,
+      },
+      async execute(args, ctx) {
+        return withBoard(
+          args.design,
+          ctx,
+          (board) => {
+            let buses = detectInterfaces(board)
+            if (args.kind) {
+              const re = toRegex(args.kind)
+              buses = buses.filter((b) => re.test(b.kind) || re.test(b.name))
+            }
+            if (args.refdes) {
+              const c = board.findComponent(args.refdes)
+              if (!c) return notFound(board.components.keys(), args.refdes, "component")
+              buses = buses.filter((b) => [...b.endpoints, ...b.series, ...b.pulls].includes(c.refDes))
+            }
+            if (!buses.length) return "No matching interface buses. Net names may not follow common conventions; try odb_search."
+            return interfacesDetail(board, buses, groupBlocks(board))
+          },
+          ["value"],
         )
       },
     }),

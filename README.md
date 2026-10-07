@@ -53,6 +53,9 @@ Configuration via environment variables:
 | Tool | Example |
 |---|---|
 | `odb_designs` | Which designs are in the folder? |
+| `odb_overview` | What is this board, what blocks and interfaces does it have? |
+| `odb_block` | What is in the USB3 block, which nets leave it? |
+| `odb_interfaces` | Which I2C buses exist, where do the CSI lanes go? |
 | `odb_component` | All connections of U35 |
 | `odb_net` | Everything on the +5V net |
 | `odb_signal_path` | Components between U34 and J1 |
@@ -76,6 +79,10 @@ Test points are recognised by convention: a `TP<n>` refdes, or a `TP`/`TestPoint
 on a part with at most two pins. `odb_testpoints` takes a `pattern` (refdes regex) for designs that
 name them differently. The ODB++ `.test_point` pad attribute is not read yet; none of the exports we
 have use it.
+
+Start with `odb_overview` for a bird's-eye view: functional blocks inferred from schematic sheet
+names in net names (KiCad), per-sheet refdes numbering (Altium) or connectivity, plus interfaces
+recognised by net names. See [docs/features/board-overview.md](docs/features/board-overview.md).
 
 ## Property mapping
 
