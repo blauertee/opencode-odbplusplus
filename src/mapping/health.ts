@@ -1,6 +1,6 @@
 // Mapping health check: does a design look like we are missing data the
 // tools need? Deterministic and cheap, runs on every load
-// (docs/plans/property-mapping-agent.md, section 3).
+// (docs/features/auto-repair-attribute-mapping.md).
 
 import { KNOWN_REFDES_PREFIXES, normalizePropertyName, PROPERTY_FIELDS } from "../aliases.ts"
 import { NO_NET, type BoardComponent, type BoardIndex } from "../board.ts"

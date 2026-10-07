@@ -1,4 +1,4 @@
-// System prompt of the odb-mapper subagent (docs/plans/property-mapping-agent.md, section 7).
+// System prompt of the odb-mapper subagent (docs/features/auto-repair-attribute-mapping.md).
 
 /** Bumped when the prompt changes meaningfully; allows a new run on cached designs. */
 export const PROMPT_VERSION = 1

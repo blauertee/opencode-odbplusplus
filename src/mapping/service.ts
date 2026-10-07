@@ -1,6 +1,6 @@
 // Ties the mapping pieces together for one loaded design: apply cached
 // layers, run the health check, start the agent when it says so, store the
-// validated result (docs/plans/property-mapping-agent.md, section 3.3).
+// validated result (docs/features/auto-repair-attribute-mapping.md).
 
 import type { BoardIndex } from "../board.ts"
 import type { AgentRunner } from "./agent.ts"

@@ -1,5 +1,5 @@
 // Deterministic MPN checks for values the mapping agent proposes
-// (docs/plans/property-mapping-agent.md, section 5.4). No API, no credentials.
+// (docs/features/auto-repair-attribute-mapping.md). No API, no credentials.
 //
 // Tier 1 rejects values that cannot be an orderable part number. Tier 2 checks
 // numbering grammars of common part families: a value that claims a family

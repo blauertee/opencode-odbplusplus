@@ -1,5 +1,5 @@
 // Checks the agent's proposal against the parsed data before anything is
-// applied (docs/plans/property-mapping-agent.md, sections 5.3 and 5.4).
+// applied (docs/features/auto-repair-attribute-mapping.md).
 
 import { normalizePropertyName } from "../aliases.ts"
 import type { BoardComponent, BoardIndex } from "../board.ts"

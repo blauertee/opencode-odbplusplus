@@ -123,7 +123,7 @@ six tools, unit and integration tests.
 - Make rail detection configurable (regex + fanout); treat resistor arrays pairwise in the path
   search instead of "everything connected".
 - Check property aliases for Altium and Pulsonix against real exports.
-- Repair under-mapped exports with a shipped mapping agent: [plans/property-mapping-agent.md](plans/property-mapping-agent.md).
+- Repair under-mapped exports with a shipped mapping agent: [features/auto-repair-attribute-mapping.md](features/auto-repair-attribute-mapping.md).
 - Upstream PRs for the OdbDesign parser fixes.
 - Move loading into a Bun worker, test the macOS build (`.dylib`).
 

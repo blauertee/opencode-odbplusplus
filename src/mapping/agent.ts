@@ -1,5 +1,5 @@
 // Runs the odb-mapper subagent through OpenCode's own session API
-// (docs/plans/property-mapping-agent.md, section 5). The agent reads a
+// (docs/features/auto-repair-attribute-mapping.md). The agent reads a
 // profile, may drill down with read-only tools and answers by calling
 // odb_mapping_submit; that tool validates the proposal and hands it back here.
 

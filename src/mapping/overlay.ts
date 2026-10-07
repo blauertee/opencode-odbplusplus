@@ -1,5 +1,5 @@
 // Mapping overlays: where agent results and user overrides live and how they
-// are layered onto a board (docs/plans/property-mapping-agent.md, section 4).
+// are layered onto a board (docs/features/auto-repair-attribute-mapping.md).
 // The ODB++ archive and its extracted copy are never written; an overlay is a
 // separate JSON file of rules, applied in memory after parsing.
 

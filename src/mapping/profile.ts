@@ -1,5 +1,5 @@
 // Compact profile of a design for the mapping agent (MappingInput,
-// docs/plans/property-mapping-agent.md, section 6.1). Every list is capped so
+// docs/features/auto-repair-attribute-mapping.md). Every list is capped so
 // a 700-part board stays at a few thousand tokens.
 
 import { PROPERTY_FIELDS, normalizePropertyName } from "../aliases.ts"

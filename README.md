@@ -86,7 +86,7 @@ mechanical parts. Built-in names are in `src/aliases.ts`. When a design still lo
 part name, as in Altium exports without parameters), the plugin starts the `odb-mapper` agent in a
 child session. The agent proposes rules; the plugin checks every rule against the data, including
 offline MPN checks, and stores the accepted ones as an overlay keyed by the archive's SHA-256. The
-archive itself is never changed. Details: [docs/plans/property-mapping-agent.md](docs/plans/property-mapping-agent.md).
+archive itself is never changed. Details: [docs/features/auto-repair-attribute-mapping.md](docs/features/auto-repair-attribute-mapping.md).
 
 To fix a mapping by hand, put `<design>.mapping.json` next to the archive. It takes the same rules
 and always wins:

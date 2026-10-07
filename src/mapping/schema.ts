@@ -1,5 +1,4 @@
-// Input and output of the property-mapping agent (docs/plans/property-mapping-agent.md,
-// section 6). The output schema is also the argument schema of odb_mapping_submit, so
+// Input and output of the property-mapping agent (docs/features/auto-repair-attribute-mapping.md). The output schema is also the argument schema of odb_mapping_submit, so
 // the model's tool call is checked against it before the validator sees it.
 
 import { tool } from "@opencode-ai/plugin"

@@ -1,6 +1,6 @@
 // Effective property mapping of one design: built-in aliases merged with the
 // mapping layers (learned conventions, agent overlay, user overrides; see
-// docs/plans/property-mapping-agent.md, section 4). Rules only change how the
+// docs/features/auto-repair-attribute-mapping.md). Rules only change how the
 // parsed properties are read; the parsed data itself is never modified.
 
 import { IGNORED_PROPERTIES, normalizePropertyName, PROPERTY_ALIASES, PROPERTY_FIELDS } from "../aliases.ts"
