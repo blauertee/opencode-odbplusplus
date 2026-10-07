@@ -3,6 +3,9 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { UnderstandingService } from "../src/explore/service.ts"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { detectInterfaces, findBlock, groupBlocks } from "../src/overview.ts"
 import { DesignStore } from "../src/store.ts"
 
@@ -63,6 +66,23 @@ describe.skipIf(!built)("jetson-orin-baseboard via libodbpp", () => {
     expect(csi0.diffPairs).toBeGreaterThanOrEqual(3)
     expect(buses.find((b) => b.name === "GBE")!.endpoints).toEqual(expect.arrayContaining(["J6", "J15"]))
     expect(buses.find((b) => b.name === "GPIOEX_I2C")!.series).toEqual(["R215", "R216"])
+  })
+
+  test("checks an explore result against the real board", () => {
+    const svc = new UnderstandingService({ designsDir: join(root, "testdata"), cacheDir: mkdtempSync(join(tmpdir(), "odb-u-")) })
+    const h = store.handle()
+    const result = {
+      block: "USB3",
+      title: "USB-C 3.x port",
+      function: "SuperSpeed USB-C port with orientation mux.",
+      keyParts: [{ refdes: "U17", role: "orientation mux" }, { refdes: "J15", role: "SoM" }],
+      interfaces: [{ name: "USB SS", peer: "SoM" }],
+      rails: ["+5V"],
+      confidence: "medium" as const,
+      evidence: ["U17 HD3SS3220"],
+    }
+    expect(svc.submitBlock(h, result, "odb-block-explore")).toContain("J15 is not in USB3 but in SoM")
+    expect(svc.submitBlock(h, { ...result, keyParts: result.keyParts.slice(0, 1) }, "odb-block-explore")).toBe("Block USB3 saved.")
   })
 
   test("leaves the designs directory untouched", () => {

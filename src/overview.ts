@@ -21,7 +21,17 @@ const GROUND = /(?:^|[^A-Z0-9])(?:[ADPS]?GND\w*|VSS\w*|0V)(?:[^A-Z0-9]|$)/i
 
 export type GroupingSource = "sheet" | "refdesBand" | "cluster"
 /** How a part got into its block. */
-export type Placement = "direct" | "connectivity" | "proximity"
+export type Placement = "direct" | "connectivity" | "proximity" | "user"
+
+/** Bumped when grouping results change; cached block understanding keyed on it goes stale. */
+export const GROUPING_VERSION = 1
+
+/** A user's part moves for one block (from <design>.understanding.md). */
+export interface PartMoves {
+  block: string
+  add: string[]
+  remove: string[]
+}
 
 export interface Block {
   name: string
@@ -150,7 +160,7 @@ function bandName(band: number, size: number): string {
 
 // ---------------------------------------------------------------- grouping
 
-export function groupBlocks(board: BoardIndex): Grouping {
+export function groupBlocks(board: BoardIndex, moves: PartMoves[] = []): Grouping {
   const parts = groupable(board)
   const byRef = new Map(parts.map((c) => [c.refDes, c]))
   const blockOf = new Map<string, string>()
@@ -215,6 +225,24 @@ export function groupBlocks(board: BoardIndex): Grouping {
     if (best) {
       blockOf.set(c.refDes, blockOf.get(best.ref)!)
       placement.set(c.refDes, "proximity")
+    }
+  }
+
+  // User part moves win over every heuristic. Unknown refdes are skipped here and reported by odb_understanding.
+  for (const m of moves) {
+    for (const r of m.remove) {
+      const ref = board.findComponent(r)?.refDes
+      if (ref && blockOf.get(ref) === m.block) {
+        blockOf.delete(ref)
+        placement.set(ref, "user")
+      }
+    }
+    for (const r of m.add) {
+      const c = board.findComponent(r)
+      if (!c) continue
+      byRef.set(c.refDes, c)
+      blockOf.set(c.refDes, m.block)
+      placement.set(c.refDes, "user")
     }
   }
 

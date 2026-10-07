@@ -184,7 +184,7 @@ function prefixCounts(refs: string[]): string {
   return [...counts].sort((a, b) => b[1] - a[1] || naturalCompare(a[0], b[0])).map(([p, n]) => `${p} ${n}`).join(", ")
 }
 
-export function overviewDetail(board: BoardIndex, g: Grouping, buses: Bus[]): string {
+export function overviewDetail(board: BoardIndex, g: Grouping, buses: Bus[], titles = new Map<string, string>()): string {
   const comps = [...board.components.values()]
   const connected = comps.filter((c) => !board.isMechanical(c))
   const sides = new Map<string, number>()
@@ -211,14 +211,15 @@ export function overviewDetail(board: BoardIndex, g: Grouping, buses: Bus[]): st
     "",
     `## Blocks (${g.blocks.length}), inferred from ${g.detail}`,
     `placed ${byPlacement("direct")} parts directly, ${byPlacement("connectivity")} by connectivity, ` +
-      `${byPlacement("proximity")} by proximity; ${g.unassigned.length} unplaced. Details: odb_block.`,
+      `${byPlacement("proximity")} by proximity${byPlacement("user") ? `, ${byPlacement("user")} by user correction` : ""}; ${g.unassigned.length} unplaced. Details: odb_block.`,
   )
   const shownBlocks = g.blocks.slice(0, 25)
   for (const b of shownBlocks) {
     const key = b.anchors.slice(0, 4).map((r) => partLabel(board, r, true))
     const rails = b.rails.slice(0, 3).map((r) => r.net)
+    const title = titles.get(b.name)
     lines.push(
-      `- ${b.name}: ${b.members.length} parts` +
+      `- ${b.name}${title ? ` "${title}"` : ""}: ${b.members.length} parts` +
         (key.length ? ` | ${key.join("; ")}${b.anchors.length > 4 ? ` +${b.anchors.length - 4}` : ""}` : "") +
         (rails.length ? ` | rails ${rails.join(", ")}` : "") +
         ` | ${b.boundary.length} nets to other blocks`,
@@ -246,15 +247,15 @@ export function overviewDetail(board: BoardIndex, g: Grouping, buses: Bus[]): st
   return lines.join("\n")
 }
 
-export function blockDetail(board: BoardIndex, g: Grouping, b: Block): string {
+export function blockDetail(board: BoardIndex, g: Grouping, b: Block, title?: string): string {
   const how = new Map<string, number>()
   for (const r of b.members) {
     const p = g.placement.get(r) ?? "direct"
     how.set(p, (how.get(p) ?? 0) + 1)
   }
   const lines = [
-    `# Block ${b.name} (${b.members.length} parts, from ${g.detail})`,
-    `placement: ${(["direct", "connectivity", "proximity"] as const).filter((p) => how.has(p)).map((p) => `${how.get(p)} ${p}`).join(", ")}`,
+    `# Block ${b.name}${title ? ` "${title}"` : ""} (${b.members.length} parts, from ${g.detail})`,
+    `placement: ${(["direct", "connectivity", "proximity", "user"] as const).filter((p) => how.has(p)).map((p) => `${how.get(p)} ${p}`).join(", ")}`,
     "",
     `## Key parts (${b.anchors.length}, >= ${ANCHOR_MIN_PINS} pins)`,
   ]

@@ -16,6 +16,10 @@ import {
 import type { OpencodeAgentRunner } from "./mapping/agent.ts"
 import { distinctValues } from "./mapping/profile.ts"
 import { outputShape, type MappingOutput, type Target } from "./mapping/schema.ts"
+import { WRITE_TOOLS } from "./explore/agents.ts"
+import { mentionsDetail, understandingBlock, understandingSummary } from "./explore/format.ts"
+import { blockResultShape, boardResultShape, correctionShape } from "./explore/schema.ts"
+import type { UnderstandingService } from "./explore/service.ts"
 import { detectInterfaces, findBlock, groupBlocks } from "./overview.ts"
 import type { DesignStore } from "./store.ts"
 
@@ -26,7 +30,16 @@ const designArg = z
   .optional()
   .describe("ODB++ archive: file name in the designs directory (extension optional) or a path. Optional when there is only one.")
 
-export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
+export function createTools(store: DesignStore, agent?: OpencodeAgentRunner, understanding?: UnderstandingService) {
+  /** Blocks with the user's part moves applied, when corrections are available. */
+  const group = (board: BoardIndex) => understanding?.grouping(board) ?? groupBlocks(board)
+  const titles = (design: string | undefined) => understanding?.titles(store.handle(design)) ?? new Map<string, string>()
+  /** Write tools are for the explore agents only, whatever the permission setup. */
+  const writer = (toolName: string, ctx: ToolContext) =>
+    WRITE_TOOLS[toolName].includes(ctx.agent)
+      ? undefined
+      : `${toolName} is only available to ${WRITE_TOOLS[toolName].join(", ")}. To correct saved understanding, launch the odb-understanding-fix subagent.`
+
   /** Open the design, run `body` and append the "mapping is being repaired" note if one applies. */
   const withBoard = async (
     design: string | undefined,
@@ -155,7 +168,7 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
         "supply rails. Start here before drilling into components; then use odb_block and odb_interfaces.",
       args: { design: designArg },
       async execute(args, ctx) {
-        return withBoard(args.design, ctx, (board) => overviewDetail(board, groupBlocks(board), detectInterfaces(board)), [
+        return withBoard(args.design, ctx, (board) => overviewDetail(board, group(board), detectInterfaces(board), titles(args.design)), [
           "value",
           "description",
         ])
@@ -177,14 +190,14 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
           args.design,
           ctx,
           (board) => {
-            const g = groupBlocks(board)
+            const g = group(board)
             const b = findBlock(g, args.block)
             if (!b) {
               const placed = board.findComponent(args.block)
               if (placed && g.unassigned.includes(placed.refDes)) return `${placed.refDes} is not placed in any block.`
               return `No block named ${args.block}. Blocks: ${g.blocks.map((x) => x.name).join(", ")}`
             }
-            return blockDetail(board, g, b)
+            return blockDetail(board, g, b, titles(args.design).get(b.name))
           },
           ["value", "description"],
         )
@@ -217,10 +230,90 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner) {
               buses = buses.filter((b) => [...b.endpoints, ...b.series, ...b.pulls].includes(c.refDes))
             }
             if (!buses.length) return "No matching interface buses. Net names may not follow common conventions; try odb_search."
-            return interfacesDetail(board, buses, groupBlocks(board))
+            return interfacesDetail(board, buses, group(board))
           },
           ["value"],
         )
+      },
+    }),
+
+    odb_understanding: tool({
+      description:
+        "Saved high-level understanding of a PCB design: what the board is for, each block's title and function, " +
+        "data flow and power, as worked out by the odb-explore agents and corrected by the user (corrections win). " +
+        "Also lists schematic files that came with the design and which blocks are not explored or stale. With " +
+        "block: one block in full. With mentions: which saved results mention a refdes, net or term. action " +
+        "'reset' drops the saved agent results (never the user's corrections file). Read-only otherwise. If the " +
+        "user corrects anything shown here, launch the odb-understanding-fix subagent.",
+      args: {
+        design: designArg,
+        block: z.string().optional().describe("Block name (or a member refdes) for the full saved result"),
+        mentions: z.string().optional().describe("Refdes, net or term to search the saved results for"),
+        action: z.enum(["show", "reset"]).optional().describe("Default: show"),
+      },
+      async execute(args, ctx) {
+        if (!understanding) return "Board understanding is not available in this setup."
+        return withBoard(args.design, ctx, (board) => {
+          const h = store.handle(args.design)
+          if (args.action === "reset") {
+            understanding.reset(h)
+            return "Saved agent results dropped. The user's corrections file is unchanged."
+          }
+          const u = understanding.context(h)
+          if (args.mentions) {
+            const terms = args.mentions.split(/[\s,]+/).filter(Boolean)
+            return mentionsDetail(u, understanding.mentioning(u, terms), args.mentions)
+          }
+          if (args.block) {
+            const b = findBlock(u.grouping, args.block)
+            if (!b) return `No block named ${args.block}. Blocks: ${u.grouping.blocks.map((x) => x.name).join(", ")}`
+            return understandingBlock(understanding, u, b, board)
+          }
+          return understandingSummary(understanding, u)
+        })
+      },
+    }),
+
+    odb_explore_submit_block: tool({
+      description:
+        "Explore agents only: save what one block does. Checked against the board data; rejected parts come back " +
+        "as text so you can fix them and submit again.",
+      args: blockResultShape,
+      async execute(args, ctx) {
+        const denied = writer("odb_explore_submit_block", ctx)
+        if (denied || !understanding) return denied ?? "Board understanding is not available in this setup."
+        const { design, ...result } = args
+        return understanding.submitBlock(store.handle(design), result, ctx.agent)
+      },
+    }),
+
+    odb_explore_submit_board: tool({
+      description:
+        "Explore agents only: save the board-level understanding (title, purpose, summary, data flow between " +
+        "blocks, power). Checked against the board data.",
+      args: boardResultShape,
+      async execute(args, ctx) {
+        const denied = writer("odb_explore_submit_board", ctx)
+        if (denied || !understanding) return denied ?? "Board understanding is not available in this setup."
+        const { design, ...result } = args
+        return understanding.submitBoard(store.handle(design), result, ctx.agent)
+      },
+    }),
+
+    odb_understanding_correct: tool({
+      description:
+        "odb-understanding-fix only: record a user's correction in <design>.understanding.md next to the archive. " +
+        "It wins over saved agent results everywhere. Returns the saved results that mention the corrected block " +
+        "or parts, which you then rewrite with the submit tools.",
+      args: correctionShape,
+      async execute(args, ctx) {
+        const denied = writer("odb_understanding_correct", ctx)
+        if (denied || !understanding) return denied ?? "Board understanding is not available in this setup."
+        const { design, ...input } = args
+        if (!input.title && !input.function && !input.addParts?.length && !input.removeParts?.length && !input.note) {
+          return "Nothing to record: pass title, function, addParts, removeParts or note."
+        }
+        return understanding.correct(store.handle(design), input)
       },
     }),
 
