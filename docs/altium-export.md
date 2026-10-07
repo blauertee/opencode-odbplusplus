@@ -20,15 +20,19 @@ The plugin only sees what ends up in the ODB++ files. From an Altium export that
 | Pins and nets | PCB netlist | `eda/data` (`NET`, `SNT`) |
 | Value, MPN, datasheet, description | component parameters, **if they are on the PCB component** | `components` (`PRP` records) |
 
-The value, MPN, datasheet and description lookups match parameter names case-insensitively, first
-match wins (`src/board.ts`):
+The value, MPN, datasheet and description lookups use the alias table in `src/aliases.ts`. Names
+are compared ignoring case, spaces and punctuation, so `Manufacturer Part Number`,
+`manufacturer_part_number` and `MANUFACTURER-PART-NUMBER` are the same. Within a field the first
+alias in this order that has a value wins:
 
 | Field | Accepted parameter names |
 |---|---|
 | Value | `Value`, `Val`, `Comment` |
-| MPN | `MPN`, `Manufacturer Part Number`, `Manufacturer_Part_Number`, `Part Number`, `PartNumber`, `PN` |
-| Datasheet | `Datasheet`, `Datasheet URL`, `DatasheetURL`, `ComponentLink1URL`, `Help URL` |
+| MPN | `MPN`, `Manufacturer Part Number`, `Manufacturer Part Number 1`, `Manufacturer1 Part Number`, `Part Number (MPN)`, `Mfr Part Number`, `Mfg Part Number`, `Manufacturer PN`, `MFGPN`, `MFR PN`, `Part Number`, `PN` |
+| Datasheet | `Datasheet`, `Datasheet URL`, `Datasheet Link`, `ComponentLink1URL`, `HelpURL` (an `https://` link is preferred over a network path) |
 | Description | `Description`, `Desc` |
+
+If your library uses another name, add it to `src/aliases.ts` instead of renaming every part.
 
 Without these, the plugin still has refdes, part name, footprint and connectivity. That covers
 search, `odb_component`, `odb_net` and `odb_signal_path`. You lose MPN search, datasheet chapters
@@ -47,18 +51,15 @@ Parameters are defined on the schematic parts. Make them consistent first.
 2. Open **Tools → Parameter Manager**. Tick all parts and run it on the whole project.
 3. Check that each part has:
    - `Value`, e.g. `10K`, `100nF`, `STM32F427VIT6`.
-   - `MPN`: the exact orderable part number. Prefer `MPN` over `Manufacturer Part Number`.
-     ODB++ property names are single tokens, so exporters replace spaces (KiCad writes
-     `Max._Curr.` for `Max. Curr.`). `MPN` survives that unchanged.
+   - An MPN under one of the names in the table above, holding the exact orderable part number.
    - `Datasheet`. This must be a **direct `https://` link to a PDF**. `odb_datasheet` downloads it
      and rejects HTML landing pages. Network paths such as `\\server\Datasheets\x.pdf` do not
-     work. Altium's own `HelpURL` parameter is **not** matched (only `Help URL` with a space is), so
-     copy the link into a `Datasheet` parameter.
+     work. `HelpURL` is matched too, but CERN-style libraries fill it with network paths, so put the
+     web link into `Datasheet`.
    - `Description` (optional, used by search).
-4. Rename odd names in the Parameter Manager. For example, rename `MFGPN` to `MPN` and
-   `DATASHEET` to `Datasheet`. In a project with several MPN-like fields
-   (`Manufacturer Part Number`, `Manufacturer1 Part Number`, `Part Number`, …), copy the one you
-   want into `MPN`. That name is checked first.
+4. In a project with several MPN-like fields (`Manufacturer Part Number`,
+   `Manufacturer1 Part Number`, `Part Number`, …) where the first one in the table holds an
+   internal number, copy the real part number into `MPN`. That name is checked first.
 5. Set each part's **Comment** to the value (`=Value`). The Comment is always exported as the
    ODB++ part name, so it is the fallback when no parameters come through.
 6. Click **Accept Changes (Create ECO)** and execute the ECO.

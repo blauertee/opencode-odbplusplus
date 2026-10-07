@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { normalizePropertyName, PROPERTY_ALIASES } from "../src/aliases.ts"
 import { BoardIndex } from "../src/board.ts"
 import { extractSection } from "../src/datasheet.ts"
 import { testPointLine } from "../src/format.ts"
@@ -136,5 +137,42 @@ describe("extractSection", () => {
 
   test("returns undefined for unknown sections", () => {
     expect(extractSection(text, "Ordering Information")).toBeUndefined()
+  })
+})
+
+describe("property aliases", () => {
+  const aliased = BoardIndex.build({
+    name: "aliases",
+    components: [
+      { refDes: "U1", props: { MFGPN: "MPU-6000", DATASHEET: "https://example.com/mpu6000.pdf" } },
+      { refDes: "U2", props: { Manufacturer_Part_Number: "TPS7A02", "Part Number": "INT-0042" } },
+      { refDes: "U3", props: { HelpURL: "\\\\server\\ds\\x.pdf", ComponentLink1URL: "https://example.com/x.pdf" } },
+      { refDes: "U4", props: { "Part Number (MPN)": "LM2596S-5.0", Value: "~", Val: "5V" } },
+    ],
+    nets: [],
+  })
+  const get = (r: string) => aliased.findComponent(r)!
+
+  test("matches names regardless of case, spaces and separators", () => {
+    expect(aliased.mpn(get("U1"))).toBe("MPU-6000")
+    expect(aliased.mpn(get("U4"))).toBe("LM2596S-5.0")
+    expect(aliased.datasheet(get("U1"))).toBe("https://example.com/mpu6000.pdf")
+  })
+
+  test("prefers specific names over generic ones", () => {
+    expect(aliased.mpn(get("U2"))).toBe("TPS7A02")
+  })
+
+  test("prefers a downloadable datasheet link over a network path", () => {
+    expect(aliased.datasheet(get("U3"))).toBe("https://example.com/x.pdf")
+  })
+
+  test("skips KiCad's empty marker", () => {
+    expect(aliased.value(get("U4"))).toBe("5V")
+  })
+
+  test("no two aliases collapse to the same name", () => {
+    const all = Object.values(PROPERTY_ALIASES).flat().map(normalizePropertyName)
+    expect(new Set(all).size).toBe(all.length)
   })
 })

@@ -6,6 +6,7 @@
 // are graph queries, so we build the graph once per design and answer every
 // tool call from memory.
 
+import { normalizePropertyName, PROPERTY_ALIASES, type PropertyField } from "./aliases.ts"
 import type { NativeBoard } from "./native.ts"
 
 export interface PinRef {
@@ -52,12 +53,6 @@ export const NO_NET = "$NONE$"
 
 const RAIL_NAME =
   /^(?:[+-]?\d+V\d*\w*|\d+V\d+\w*|A?GND\w*|D?GND\w*|P?GND\w*|VSS\w*|VCC\w*|VDD\w*|VEE\w*|VBUS\w*|VBAT\w*|VIN\w*|VSYS\w*)$/i
-
-// Property names differ per EDA tool; first match wins.
-const VALUE_KEYS = ["value", "val", "comment"]
-const MPN_KEYS = ["mpn", "manufacturer part number", "manufacturer_part_number", "part number", "partnumber", "pn"]
-const DATASHEET_KEYS = ["datasheet", "datasheet url", "datasheeturl", "componentlink1url", "help url"]
-const DESCRIPTION_KEYS = ["description", "desc"]
 
 // Test points are recognised by convention: KiCad, Altium and Pulsonix all
 // export them as one- or two-pad components with a TP refdes and/or a
@@ -144,16 +139,18 @@ export class BoardIndex {
   // ------------------------------------------------------------ properties
 
   value(c: BoardComponent) {
-    return prop(c, VALUE_KEYS)
+    return prop(c, "value")[0]
   }
   mpn(c: BoardComponent) {
-    return prop(c, MPN_KEYS)
+    return prop(c, "mpn")[0]
   }
+  /** Prefers a web link, since odb_datasheet can only download those (Altium's HelpURL is often a network path). */
   datasheet(c: BoardComponent) {
-    return prop(c, DATASHEET_KEYS)
+    const candidates = prop(c, "datasheet")
+    return candidates.find((v) => /^https?:\/\//i.test(v)) ?? candidates[0]
   }
   description(c: BoardComponent) {
-    return prop(c, DESCRIPTION_KEYS)
+    return prop(c, "description")[0]
   }
 
   // ----------------------------------------------------------- test points
@@ -263,13 +260,19 @@ export class BoardIndex {
   }
 }
 
-function prop(c: BoardComponent, keys: string[]): string | undefined {
-  for (const key of keys) {
-    for (const [k, v] of Object.entries(c.properties)) {
-      if (k.toLowerCase() === key && v && v !== "~") return v
-    }
+/** Non-empty values of a field, in alias priority order (see src/aliases.ts). */
+function prop(c: BoardComponent, field: PropertyField): string[] {
+  const byName = new Map<string, string>()
+  for (const [k, v] of Object.entries(c.properties)) {
+    const key = normalizePropertyName(k)
+    if (v && v !== "~" && !byName.has(key)) byName.set(key, v)
   }
-  return undefined
+  const values: string[] = []
+  for (const alias of PROPERTY_ALIASES[field]) {
+    const v = byName.get(normalizePropertyName(alias))
+    if (v !== undefined && !values.includes(v)) values.push(v)
+  }
+  return values
 }
 
 /** Treat the query as a regex when it looks like one, else as a case-insensitive substring. */
