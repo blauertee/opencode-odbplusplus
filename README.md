@@ -70,6 +70,10 @@ In your own projects, put ODB++ archives (`*.tgz`, `*.zip`) into a `designs/` fo
 or set `ODB_DESIGNS_DIR`.
 
 **Updating:** `git pull && bun install && bun run build:native` in the clone, then restart OpenCode.
+
+**When a tool call fails:** click the red row in the TUI to see the error text (`opencode run` prints it).
+A parse failure includes what OdbDesign wrote to stderr; set `ODB_DEBUG=1` for its full log. See
+[docs/features/error-messages.md](docs/features/error-messages.md).
 The native build only re-clones OdbDesign if `native/vendor/OdbDesign` is missing; delete
 `native/vendor/` when the pinned OdbDesign revision in `native/build.sh` changes.
 

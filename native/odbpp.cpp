@@ -10,13 +10,20 @@
 //
 // The returned string is owned by the caller and released with odbpp_free().
 
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
+
+#include <unistd.h>
 
 #include "OdbDesign.h"
 #include "Logger.h"
@@ -79,10 +86,103 @@ namespace
 		done = true;
 		// The library logs through a background thread to stdout and a log file.
 		// Inside OpenCode stdout belongs to the TUI, so keep errors on stderr only.
+		// ODB_DEBUG=1 logs everything OdbDesign has to say (it ends up in error messages).
 		auto* logger = Utils::Logger::instance();
 		logger->outputTypes(Utils::Logger::OutputTypes::StdErr);
-		logger->logLevel(Utils::Logger::Level::Error);
+		const char* debug = std::getenv("ODB_DEBUG");
+		logger->logLevel(debug && *debug && std::strcmp(debug, "0") != 0 ? Utils::Logger::Level::Debug : Utils::Logger::Level::Error);
 		logger->start();
+	}
+
+	// OdbDesign reports why a parse failed only on stderr (its logger thread and
+	// libarchive), which nobody sees inside OpenCode, and then throws a generic
+	// error. Capture stderr while parsing so failures can carry the real reason.
+	class StderrCapture
+	{
+	public:
+		StderrCapture()
+		{
+			std::fflush(stderr);
+			m_file = std::tmpfile();
+			m_saved = ::dup(STDERR_FILENO);
+			if (!m_file || m_saved < 0 || dup2(fileno(m_file), STDERR_FILENO) < 0) release();
+		}
+
+		~StderrCapture() { finish(); }
+
+		// Stop capturing and return what was written, after the logger thread
+		// caught up (it logs asynchronously). The text is also passed on to the
+		// real stderr, so nothing is swallowed.
+		std::string finish()
+		{
+			if (!m_file) return "";
+			static std::atomic<int> counter{0};
+			const std::string marker = "odbpp-sync-" + std::to_string(++counter);
+			Utils::Logger::instance()->error(marker);
+			std::string text;
+			for (int i = 0; i < 200; i++)
+			{
+				std::fflush(stderr);
+				std::cerr.flush();
+				text = read();
+				if (text.find(marker) != std::string::npos) break;
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			}
+			release();
+			// Drop the sync line.
+			auto at = text.find(marker);
+			if (at != std::string::npos)
+			{
+				auto start = text.rfind('\n', at);
+				auto end = text.find('\n', at);
+				text.erase(start == std::string::npos ? 0 : start + 1, end == std::string::npos ? std::string::npos : end - start);
+			}
+			if (!text.empty()) std::fwrite(text.data(), 1, text.size(), stderr);
+			return text;
+		}
+
+	private:
+		std::FILE* m_file = nullptr;
+		int m_saved = -1;
+
+		std::string read()
+		{
+			std::string text;
+			char buf[4096];
+			ssize_t n;
+			off_t at = 0;
+			while ((n = pread(fileno(m_file), buf, sizeof(buf), at)) > 0)
+			{
+				text.append(buf, n);
+				at += n;
+			}
+			return text;
+		}
+
+		void release()
+		{
+			if (m_saved >= 0)
+			{
+				std::fflush(stderr);
+				dup2(m_saved, STDERR_FILENO);
+				close(m_saved);
+				m_saved = -1;
+			}
+			if (m_file)
+			{
+				std::fclose(m_file);
+				m_file = nullptr;
+			}
+		}
+	};
+
+	// The last lines of captured output, without trailing blank lines.
+	std::string tail(std::string text, size_t max = 2000)
+	{
+		while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) text.pop_back();
+		if (text.size() <= max) return text;
+		auto cut = text.find('\n', text.size() - max);
+		return "..." + text.substr(cut == std::string::npos ? text.size() - max : cut);
 	}
 
 	std::string boardJson(const std::string& path)
@@ -190,11 +290,14 @@ extern "C"
 	// itself, so callers should pass a copy in a scratch directory.
 	char* odbpp_load_board(const char* path)
 	{
+		quietLogger();
+		g_lastError.clear();
+		StderrCapture capture;
 		try
 		{
-			quietLogger();
-			g_lastError.clear();
-			return dup(boardJson(path ? path : ""));
+			auto json = boardJson(path ? path : "");
+			capture.finish();
+			return dup(json);
 		}
 		catch (const std::exception& e)
 		{
@@ -204,6 +307,8 @@ extern "C"
 		{
 			g_lastError = "unknown error";
 		}
+		auto log = tail(capture.finish());
+		if (!log.empty()) g_lastError += "\nOdbDesign output:\n" + log;
 		return nullptr;
 	}
 

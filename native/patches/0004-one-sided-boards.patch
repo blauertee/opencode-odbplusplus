@@ -1,0 +1,53 @@
+diff --git a/OdbDesignLib/ProductModel/Design.cpp b/OdbDesignLib/ProductModel/Design.cpp
+index f95b5f6..beef794 100644
+--- a/OdbDesignLib/ProductModel/Design.cpp
++++ b/OdbDesignLib/ProductModel/Design.cpp
+@@ -288,13 +288,12 @@ namespace Odb::Lib::ProductModel
+ 
+ 		// top components layer
+ 		auto pTopComponentsFile = pStepDirectory->GetTopComponentsFile();
+-		if (pTopComponentsFile == nullptr) return false;
+-		if (! BuildComponents(pTopComponentsFile)) return false;
++		// a board with parts on one side only has no components layer for the other
++		if (pTopComponentsFile != nullptr && !BuildComponents(pTopComponentsFile)) return false;
+ 
+ 		// bottom layer components
+ 		auto pBottomComponentsFile = pStepDirectory->GetBottomComponentsFile();
+-		if (pBottomComponentsFile == nullptr) return false;
+-		if (!BuildComponents(pBottomComponentsFile)) return false;
++		if (pBottomComponentsFile != nullptr && !BuildComponents(pBottomComponentsFile)) return false;
+ 
+ 		return true;
+ 	}
+@@ -381,12 +380,11 @@ namespace Odb::Lib::ProductModel
+ 		auto& pStepDirectory = steps.begin()->second;
+ 
+ 		auto pTopComponentsFile = pStepDirectory->GetTopComponentsFile();
+-		if (pTopComponentsFile == nullptr) return false;
+-		if (! BuildParts(pTopComponentsFile)) return false;
++		// a board with parts on one side only has no components layer for the other
++		if (pTopComponentsFile != nullptr && !BuildParts(pTopComponentsFile)) return false;
+ 
+ 		auto pBottomComponentsFile = pStepDirectory->GetBottomComponentsFile();
+-		if (pBottomComponentsFile == nullptr) return false;
+-		if (! BuildParts(pBottomComponentsFile)) return false;
++		if (pBottomComponentsFile != nullptr && !BuildParts(pBottomComponentsFile)) return false;
+ 
+ 		return true;
+ 	}
+@@ -420,12 +418,11 @@ namespace Odb::Lib::ProductModel
+ 		auto& pStepDirectory = steps.begin()->second;
+ 
+ 		auto pTopComponentsFile = pStepDirectory->GetTopComponentsFile();
+-		if (pTopComponentsFile == nullptr) return false;
+-		if (! BuildPlacementsFromComponentsFile(pTopComponentsFile)) return false;
++		// a board with parts on one side only has no components layer for the other
++		if (pTopComponentsFile != nullptr && !BuildPlacementsFromComponentsFile(pTopComponentsFile)) return false;
+ 
+ 		auto pBottomComponentsFile = pStepDirectory->GetBottomComponentsFile();
+-		if (pBottomComponentsFile == nullptr) return false;
+-		if (!BuildPlacementsFromComponentsFile(pBottomComponentsFile)) return false;
++		if (pBottomComponentsFile != nullptr && !BuildPlacementsFromComponentsFile(pBottomComponentsFile)) return false;
+ 
+ 		return true;
+ 	}
