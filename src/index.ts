@@ -18,6 +18,8 @@ import { createTools } from "./tools.ts"
  *                                        default "designs" in the project
  *   design       / ODB_DESIGN            default design for all tools
  *   ODBPP_LIB                            path to libodbpp, default native/lib/ in this package
+ *   ODB_DEBUG                            "1": OdbDesign logs everything, not just errors; a failed
+ *                                        parse includes that output in its error message
  *   mappingAgent / ODB_MAPPING_AGENT     "auto" (default): repair under-mapped designs with
  *                                        the odb-mapper agent; "off": never start it on its own
  *   mappingModel / ODB_MAPPING_MODEL     "provider/model" for the agent, default OpenCode's small_model
