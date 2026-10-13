@@ -26,8 +26,11 @@ fi
 if [ ! -d "$VENDOR/OdbDesign" ]; then
   git clone --quiet https://github.com/nam20485/OdbDesign "$VENDOR/OdbDesign"
   git -C "$VENDOR/OdbDesign" checkout --quiet "$ODBDESIGN_REF"
-  for p in "$HERE"/patches/*.patch; do git -C "$VENDOR/OdbDesign" apply "$p"; done
 fi
+# Apply patches not applied yet, so updating the plugin picks up new ones.
+for p in "$HERE"/patches/*.patch; do
+  git -C "$VENDOR/OdbDesign" apply --reverse --check "$p" 2>/dev/null || git -C "$VENDOR/OdbDesign" apply "$p"
+done
 
 cmake -S "$HERE" -B "$HERE/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$VENDOR/crow-install"

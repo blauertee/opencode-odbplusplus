@@ -33,3 +33,15 @@ parse failure carries the extraction and parsing steps leading up to it. It is r
 board is loaded, so OpenCode has to be restarted for a change to apply.
 
 Changes to `native/odbpp.cpp` need `bun run build:native` again.
+
+## "could not build product model"
+
+The archive extracted and parsed, but OdbDesign's product model build returned false. That build stops
+silently (no log line) at the first missing piece. The usual cause was a board with parts on one side
+only: the export then has no `comp_+_bot` (or `comp_+_top`) layer and OdbDesign gave up.
+`native/patches/0004-one-sided-boards.patch` skips the missing side instead. `native/build.sh` now applies
+patches that are not applied yet to an existing `native/vendor/OdbDesign`, so `bun run build:native` in an
+existing clone picks up new patches.
+
+If the message still appears, other parts of the build are the reason (no step, a component pin that
+points at a net or package pin that does not exist); ODB_DEBUG output does not say which.
