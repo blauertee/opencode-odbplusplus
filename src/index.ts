@@ -5,6 +5,8 @@ import { AGENT_NAME, AGENT_TOOLS, agentConfig, OpencodeAgentRunner } from "./map
 import { MappingCache } from "./mapping/overlay.ts"
 import { MappingService } from "./mapping/service.ts"
 import { applyExploreConfig } from "./explore/agents.ts"
+import { applyPartConfig, PartService } from "./part/agent.ts"
+import { PartNotesStore } from "./part/notes.ts"
 import { UnderstandingService } from "./explore/service.ts"
 import { DesignStore } from "./store.ts"
 import { createTools } from "./tools.ts"
@@ -35,6 +37,11 @@ import { createTools } from "./tools.ts"
  *   exploreModel / ODB_EXPLORE_MODEL     "provider/model" for the explore agents, default the session's
  *   blockExploreModel, fixModel          per-agent overrides of exploreModel
  *   exploreMaxSubagents                  block subagents per odb-explore run (12)
+ *   partModel    / ODB_PART_MODEL        "provider/model" for odb-part (odb_part_ask), default the caller's
+ *   partWeb      / ODB_PART_WEB          "off": odb-part does not look for datasheets on the web
+ *   partDir      / ODB_PART_DIR          where per-part notes are stored, default in the cache
+ *   partTimeoutMs                        max time for one odb_part_ask (300000)
+ *   partContextTokens                    a part session bigger than this starts over from its notes (60000)
  */
 export const OdbPlusPlusPlugin: Plugin = async (input, options = {}) => {
   const opt = (key: string, env?: string) => (options[key] as string | undefined) ?? (env ? process.env[env] : undefined)
@@ -68,8 +75,21 @@ export const OdbPlusPlusPlugin: Plugin = async (input, options = {}) => {
   })
   const exploreModel = opt("exploreModel", "ODB_EXPLORE_MODEL")
 
+  const partModel = opt("partModel", "ODB_PART_MODEL")
+  const partWeb = opt("partWeb", "ODB_PART_WEB") !== "off"
+  const partDir = opt("partDir", "ODB_PART_DIR")
+  const part = new PartService({
+    client: input.client,
+    notes: new PartNotesStore(partDir ? path(partDir) : undefined),
+    datasheetText,
+    model: partModel,
+    web: partWeb,
+    timeoutMs: num("partTimeoutMs", 300_000),
+    contextBudget: num("partContextTokens", 60_000),
+  })
+
   return {
-    tool: createTools(store, agent, understanding),
+    tool: createTools(store, agent, understanding, part),
 
     // Register the agents and keep their write tools away from every other agent.
     async config(config) {
@@ -87,6 +107,7 @@ export const OdbPlusPlusPlugin: Plugin = async (input, options = {}) => {
         fixModel: opt("fixModel"),
         maxSubagents: num("exploreMaxSubagents", 12),
       })
+      applyPartConfig(config as Record<string, any>, { model: partModel, web: partWeb })
     },
   }
 }

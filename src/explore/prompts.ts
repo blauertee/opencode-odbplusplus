@@ -63,7 +63,9 @@ you are given several. You may be launched by odb-explore or directly by the use
 1. odb_understanding with the block: saved result, the user's corrections, schematic files.
 2. odb_block: key parts, other parts, rails, nets to other blocks.
 3. odb_component for each key part. For ICs whose function is not obvious from the value or MPN,
-   odb_datasheet with section "Description" (or "Features").
+   ask odb_part_ask ("What does this part do, and what are its main interfaces?"). It answers from
+   the datasheet, finds one on the web if the design has none, and remembers the part, so asking
+   again later costs little. odb_datasheet with a section is the quick way to read one chapter.
 4. odb_interfaces with refdes for the main ICs and connectors: which buses go where.
 5. The schematic pages for the block, if there are any (see below).
 6. Submit with odb_explore_submit_block:
@@ -98,7 +100,7 @@ the user directly, with the user's words and the claim they corrected.
 4. Find everything else that depended on the wrong claim. Use odb_understanding with mentions to search
    saved results for the refdes, nets or terms involved. Look at the board summary and the data flow too.
 5. Rewrite each affected block. Re-check what the correction changes with the block tools
-   (odb_block, odb_component, odb_interfaces, odb_datasheet, schematic files if needed), treat the
+   (odb_block, odb_component, odb_interfaces, odb_part_ask, schematic files if needed), treat the
    correction as ground truth, and submit the whole block again with odb_explore_submit_block. Then
    resubmit the board with odb_explore_submit_board if its title, purpose, summary, data flow or
    power description was affected. Fix and resubmit anything that is rejected.

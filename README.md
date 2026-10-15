@@ -92,8 +92,11 @@ Configuration via environment variables:
 | `ODB_UNDERSTANDING_DIR` | in the cache | where the explore agents' saved results per design are stored (e.g. in the project, to commit them) |
 | `ODB_SCHEMATIC` | – | extra schematic files or folders, comma-separated (any file type) |
 | `ODB_EXPLORE_MODEL` | the session's model | `provider/model` for the explore agents |
+| `ODB_PART_MODEL` | the calling agent's model | `provider/model` for the `odb-part` agent behind `odb_part_ask` |
+| `ODB_PART_WEB` | on | `off`: `odb-part` does not look for datasheets on the web |
+| `ODB_PART_DIR` | in the cache | where per-part notes (datasheet, earlier answers) are stored |
 
-`odb_datasheet` needs `pdftotext` (package `poppler-utils`).
+`odb_datasheet` and `odb_part_ask` need `pdftotext` (package `poppler-utils`).
 
 ## Tools
 
@@ -109,6 +112,7 @@ Configuration via environment variables:
 | `odb_search` | Where is the TUSB1046? Which nets are named `*I2C*`? |
 | `odb_testpoints` | Which test pad carries I2C SDA? What is on TP21? All test points |
 | `odb_datasheet` | Description chapter from the U10 datasheet |
+| `odb_part_ask` | What is the I2C address of U3? Absolute maximum VIN of U12? Answered from the datasheet by a subagent that remembers the part |
 | `odb_mapping` | How are properties mapped on this design, what is missing? Re-run or reset the mapping agent |
 | `odb_understanding` | What do the saved results and user corrections say about this board or the USB3 block? |
 
@@ -150,6 +154,17 @@ A schematic in any format can be put next to the archive as `<design>.schematic.
 text, …) or set with `ODB_SCHEMATIC`. The plugin never parses it; the agents read it with whatever
 tools your OpenCode setup has. The plugin sets `subagent_depth: 2` unless you set it, so
 `odb-explore` can launch subagents. Details: [docs/features/board-exploration.md](docs/features/board-exploration.md).
+
+## Questions about a part
+
+`odb_part_ask { refdes, question }` hands a question about one component to the `odb-part` agent,
+which answers from the datasheet with page numbers. If the design has no datasheet link, or the link
+is a landing page, it looks for the PDF with your OpenCode web tools (`websearch`, `webfetch`, MCP
+search servers) and keeps it only if the MPN is in it. The agent keeps the part's context: one child
+session per part and chat, reused for every question, and notes on disk with the datasheet and all
+answers, so a repeated question is answered without a model and a new chat starts from what was
+learned. In the TUI, `<leader>↓` from your chat opens the first child session and `←`/`→` cycle through them. Details:
+[docs/features/part-questions.md](docs/features/part-questions.md).
 
 ## Property mapping
 
