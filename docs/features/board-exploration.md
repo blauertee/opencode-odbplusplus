@@ -46,8 +46,8 @@ If the task tool is refused (see nested subagents), it explores the blocks itsel
 
 ### odb-block-explore
 
-Steps: `odb_understanding {block}` → `odb_block` → `odb_component` for key parts → `odb_datasheet`
-(Description) where the function is not obvious → `odb_interfaces {refdes}` → schematic pages →
+Steps: `odb_understanding {block}` → `odb_block` → `odb_component` for key parts → `odb_part_ask`
+(what the part does, see [part-questions.md](part-questions.md)) where the function is not obvious → `odb_interfaces {refdes}` → schematic pages →
 `odb_explore_submit_block`.
 
 It submits:

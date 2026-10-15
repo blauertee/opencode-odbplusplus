@@ -1,6 +1,6 @@
 import { tool, type ToolContext } from "@opencode-ai/plugin"
 import { naturalCompare, toRegex, type BoardIndex } from "./board.ts"
-import { datasheetText, extractSection } from "./datasheet.ts"
+import { datasheetText, extractSection, outline, pageRange, searchPages } from "./datasheet.ts"
 import {
   blockDetail,
   componentDetail,
@@ -17,9 +17,11 @@ import type { OpencodeAgentRunner } from "./mapping/agent.ts"
 import { distinctValues } from "./mapping/profile.ts"
 import { outputShape, type MappingOutput, type Target } from "./mapping/schema.ts"
 import { WRITE_TOOLS } from "./explore/agents.ts"
+import { notesSummary } from "./part/notes.ts"
 import { mentionsDetail, understandingBlock, understandingSummary } from "./explore/format.ts"
 import { blockResultShape, boardResultShape, correctionShape } from "./explore/schema.ts"
 import type { UnderstandingService } from "./explore/service.ts"
+import { PART_AGENT, type PartService } from "./part/agent.ts"
 import { detectInterfaces, findBlock, groupBlocks } from "./overview.ts"
 import type { DesignStore } from "./store.ts"
 
@@ -30,7 +32,7 @@ const designArg = z
   .optional()
   .describe("ODB++ archive: file name in the designs directory (extension optional) or a path. Optional when there is only one.")
 
-export function createTools(store: DesignStore, agent?: OpencodeAgentRunner, understanding?: UnderstandingService) {
+export function createTools(store: DesignStore, agent?: OpencodeAgentRunner, understanding?: UnderstandingService, part?: PartService) {
   /** Blocks with the user's part moves applied, when corrections are available. */
   const group = (board: BoardIndex) => understanding?.grouping(board) ?? groupBlocks(board)
   const titles = (design: string | undefined) => understanding?.titles(store.handle(design)) ?? new Map<string, string>()
@@ -398,6 +400,40 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner, und
       },
     }),
 
+    odb_part_ask: tool({
+      description:
+        "Ask a question about one component, answered from its datasheet by the odb-part subagent: pinout, ratings, " +
+        "electrical characteristics, I2C address, register settings, what a pin does, recommended circuit. Finds the " +
+        "datasheet on the web when the design has none. The agent keeps the part's datasheet and earlier answers, so " +
+        "ask again about the same part freely. One component per call; for identical parts ask once.",
+      args: {
+        refdes: z.string().describe("Reference designator"),
+        question: z.string().describe("The question, self-contained, e.g. 'What is the absolute maximum VIN?'"),
+        design: designArg,
+      },
+      async execute(args, ctx) {
+        if (!part) return "The odb-part agent is not available in this setup (no OpenCode client)."
+        if (ctx.agent === PART_AGENT) return "odb-part answers from the datasheet itself; it does not call odb_part_ask."
+        return withBoard(
+          args.design,
+          ctx,
+          async (board) => {
+            const c = board.findComponent(args.refdes)
+            if (!c) return notFound(board.components.keys(), args.refdes, "component")
+            const h = store.handle(args.design)
+            return part.ask({
+              board,
+              design: { stem: h.stem, fingerprint: h.fingerprint },
+              component: c,
+              question: args.question,
+              ctx: { sessionID: ctx.sessionID, messageID: ctx.messageID, abort: ctx.abort, metadata: (m) => ctx.metadata(m) },
+            })
+          },
+          ["datasheet", "mpn"],
+        )
+      },
+    }),
+
     odb_mapping: tool({
       description:
         "Show how a design's component properties are mapped to value, MPN, datasheet, description, manufacturer, " +
@@ -457,6 +493,78 @@ export function createTools(store: DesignStore, agent?: OpencodeAgentRunner, und
       async execute(args, ctx) {
         if (!agent) return "Only available to the mapping agent."
         return agent.submit(ctx.sessionID, args as MappingOutput)
+      },
+    }),
+
+    // ---- tools of the odb-part agent (disabled for every other agent, see src/part/agent.ts)
+
+    odb_part_context: tool({
+      description: "odb-part only: the part on the board (pins and nets, other refdes with the same MPN) and the saved notes.",
+      args: {},
+      async execute(_args, ctx) {
+        const run = part?.run(ctx.sessionID)
+        if (!run) return "Only available to the odb-part agent inside an odb_part_ask run."
+        const { board, component: c } = run
+        const mpn = board.mpn(c)
+        const same = mpn ? [...board.components.values()].filter((o) => o.refDes !== c.refDes && board.mpn(o) === mpn).map((o) => o.refDes) : []
+        return [
+          componentDetail(board, c, 6),
+          "",
+          same.length ? `Same MPN on this board: ${same.sort(naturalCompare).join(", ")}` : "No other part on this board has this MPN.",
+          "",
+          "## Notes",
+          notesSummary(run.notes),
+        ].join("\n")
+      },
+    }),
+
+    odb_part_datasheet: tool({
+      description:
+        "odb-part only: read the part's datasheet. info: outline with page numbers; search: pages containing all " +
+        "words of query; pages: text of pages from..to; section: one chapter by heading; set: register a datasheet " +
+        "PDF found on the web (url), checked to contain the MPN.",
+      args: {
+        action: z.enum(["info", "search", "pages", "section", "set"]).describe("What to do"),
+        query: z.string().optional().describe("search: words that must all be on the page"),
+        from: z.number().int().optional().describe("pages: first page (1-based)"),
+        to: z.number().int().optional().describe("pages: last page, at most 4 after from"),
+        section: z.string().optional().describe("section: chapter heading, e.g. 'Absolute Maximum Ratings'"),
+        url: z.string().optional().describe("set: direct link to the PDF"),
+      },
+      async execute(args, ctx) {
+        const run = part?.run(ctx.sessionID)
+        if (!part || !run) return "Only available to the odb-part agent inside an odb_part_ask run."
+        if (args.action === "set") return args.url ? part.setDatasheet(run, args.url) : "Pass url."
+        const ds = run.datasheet
+        if (!ds) return "No datasheet loaded. Find one and register it with action set, or answer from the board data."
+        switch (args.action) {
+          case "info":
+            return `${ds.url}, ${ds.pages.length} pages\n\n${outline(ds.pages)}`
+          case "search":
+            return args.query ? searchPages(ds.pages, args.query) : "Pass query."
+          case "pages": {
+            if (!args.from) return "Pass from (and to)."
+            return pageRange(ds.pages, args.from, Math.min(args.to ?? args.from, args.from + 4))
+          }
+          case "section":
+            if (!args.section) return "Pass section."
+            return extractSection(ds.pages.join("\n"), args.section) ?? `No heading "${args.section}". Use info or search.`
+        }
+      },
+    }),
+
+    odb_part_answer: tool({
+      description: "odb-part only: submit the answer to the question. Call once; it ends the run.",
+      args: {
+        answer: z.string().describe("The answer: concrete values with units and conditions, pin names, quotes where wording matters"),
+        pages: z.array(z.number().int()).optional().describe("Datasheet pages the answer is on"),
+        source: z.enum(["datasheet", "board", "web", "not-found"]).describe("Where the answer comes from"),
+        confidence: z.enum(["high", "medium", "low"]),
+      },
+      async execute(args, ctx) {
+        const run = part?.run(ctx.sessionID)
+        if (!part || !run) return "Only available to the odb-part agent inside an odb_part_ask run."
+        return part.submitAnswer(run, args)
       },
     }),
   }
